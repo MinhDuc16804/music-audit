@@ -52,6 +52,26 @@ npm run catalog:import -- data/catalog.csv
 `data/` và `public/catalog.json` không vào git vì có thể chứa thông tin hợp đồng. App web không có đăng nhập: ai mở được app
 thì đọc được toàn bộ `catalog.json`, nên đừng đưa dữ liệu hợp đồng lên trang công khai.
 
+### Nhập kết quả ACRCloud
+
+Lệnh dưới đây đọc kết quả do `music-audit` lưu ở `out/raw` (có thể truyền thư mục khác) và tạo `data/catalog.acrcloud.csv`:
+
+```bash
+npm run catalog:acr
+```
+
+Rồi nhập chung với file hợp đồng. **Đặt file hợp đồng lên trước**, vì khi trùng bài thì file đứng trước được ưu tiên:
+
+```bash
+npm run catalog:import -- data/catalog.csv data/catalog.acrcloud.csv
+```
+
+Mọi bài ACRCloud nhận ra đều được ghi là `RESTRICTED`, kể cả chính sách `Allow`, vì ACRCloud cho biết ai giữ quyền chứ không cho biết
+công ty có được dùng hay không. Video không nhận ra bài nào thì không được ghi vào dữ liệu và không được coi là an toàn. Định dạng
+được viết theo tài liệu API, chưa đối chiếu với tài khoản thật.
+
+### Dữ liệu demo
+
 Muốn thử khối lượng lớn, lệnh sau tạo 5.000 bài giả và app sẽ hiện cảnh báo dữ liệu demo. Khi có dữ liệu thật, chỉ cần chạy lại
 lệnh nhập ở trên là dữ liệu demo được thay thế.
 
@@ -67,6 +87,7 @@ npm run catalog:demo
 | `src/analyzer.ts` | Luật phân loại |
 | `src/analyzer.test.ts` | Unit test cho luật phân loại |
 | `src/catalog.ts` | Dữ liệu mẫu kèm theo app và danh sách nguồn nhạc |
-| `src/catalogImport.ts` | Đọc và kiểm tra CSV |
+| `src/catalogImport.ts` | Đọc, kiểm tra và gộp CSV |
+| `src/acrConvert.ts` | Chuyển kết quả ACRCloud thành CSV |
 | `scripts/` | Lệnh nhập dữ liệu và tạo dữ liệu demo |
 | `templates/catalog.csv` | File mẫu |

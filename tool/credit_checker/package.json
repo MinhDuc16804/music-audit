@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "catalog:import": "node scripts/importCatalog.ts",
+    "catalog:acr": "node scripts/convertAcrResults.ts",
     "catalog:demo": "node scripts/generateDemoCatalog.ts && node scripts/importCatalog.ts data/catalog.demo.csv --demo"
   },
   "dependencies": {

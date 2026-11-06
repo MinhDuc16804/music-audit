@@ -143,6 +143,26 @@ function getRightsText(status: CopyrightStatus, licenseType: string) {
   };
 }
 
+/** Gộp nhiều danh sách, danh sách đứng trước được ưu tiên khi trùng bài. */
+export function mergeCatalogEntries(lists: CatalogEntry[][]): { entries: CatalogEntry[]; skippedCount: number } {
+  const entries: CatalogEntry[] = [];
+  const seenKeys = new Set<string>();
+  let skippedCount = 0;
+
+  for (const list of lists) {
+    for (const entry of list) {
+      const keys = entry.titles.flatMap((title) => entry.artists.map((artist) => getCatalogKey(title, artist)));
+      if (keys.some((key) => seenKeys.has(key))) {
+        skippedCount += 1;
+        continue;
+      }
+      keys.forEach((key) => seenKeys.add(key));
+      entries.push(entry);
+    }
+  }
+  return { entries, skippedCount };
+}
+
 /** Kiểm tra từng dòng. Số dòng tính cả dòng tiêu đề, khớp với số dòng trong Excel. */
 export function importCatalogRows(rows: string[][], today: string): ImportResult {
   const entries: CatalogEntry[] = [];
