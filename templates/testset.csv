@@ -1,0 +1,6 @@
+source,group,music_origin,has_speech,expected_title,expected_artist,has_source_file,channel,note
+https://www.youtube.com/watch?v=VIDEO_ID_1,strike,vn,no,Ten bai gay strike,Ten ca si,yes,Kenh A,Dong vi du - xoa truoc khi chay
+/duong/dan/den/bai-hat-gay-strike.mp3,strike,vn,no,Ten bai gay strike,Ten ca si,,,Dong vi du - video da bi go nen dung file bai hat
+https://www.youtube.com/watch?v=VIDEO_ID_2,commercial,foreign,yes,Ten bai nhac,Ten ca si,no,Kenh B,Dong vi du - xoa truoc khi chay
+https://www.youtube.com/watch?v=VIDEO_ID_3,licensed,foreign,no,Ten bai co giay phep,Ten nghe si,yes,Kenh A,Dong vi du - xoa truoc khi chay
+https://www.youtube.com/watch?v=VIDEO_ID_4,no_music,none,yes,,,yes,Kenh C,Dong vi du - xoa truoc khi chay

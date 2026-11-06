@@ -1,0 +1,10 @@
+# Khóa truy cập
+.env
+
+# Danh sách video và kết quả quét: dữ liệu nhạy cảm về pháp lý, không đưa vào git
+data/
+out/
+
+__pycache__/
+*.pyc
+.DS_Store
