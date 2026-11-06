@@ -10,6 +10,7 @@
     "test": "vitest run",
     "catalog:import": "node scripts/importCatalog.ts",
     "catalog:acr": "node scripts/convertAcrResults.ts",
+    "demo:acr": "node scripts/generateDemoCatalog.ts --if-missing && node scripts/convertAcrResults.ts templates/acr-sample && node scripts/importCatalog.ts data/catalog.demo.csv data/catalog.acrcloud.csv --demo",
     "catalog:demo": "node scripts/generateDemoCatalog.ts && node scripts/importCatalog.ts data/catalog.demo.csv --demo"
   },
   "dependencies": {

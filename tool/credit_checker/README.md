@@ -70,6 +70,13 @@ Mọi bài ACRCloud nhận ra đều được ghi là `RESTRICTED`, kể cả ch
 công ty có được dùng hay không. Video không nhận ra bài nào thì không được ghi vào dữ liệu và không được coi là an toàn. Định dạng
 được viết theo tài liệu API, chưa đối chiếu với tài khoản thật.
 
+Muốn xem thử khi chưa có tài khoản ACRCloud, lệnh sau dùng kết quả giả trong `templates/acr-sample` rồi nhập chung với 5.000 bài demo.
+Sau đó nhập "Bài Mẫu Thương Mại" và "Ca Sĩ Mẫu" trong app:
+
+```bash
+npm run demo:acr
+```
+
 ### Dữ liệu demo
 
 Muốn thử khối lượng lớn, lệnh sau tạo 5.000 bài giả và app sẽ hiện cảnh báo dữ liệu demo. Khi có dữ liệu thật, chỉ cần chạy lại

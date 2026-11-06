@@ -3,11 +3,20 @@
  * Cách dùng: npm.cmd run catalog:demo
  */
 
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CATALOG_COLUMNS } from '../src/catalogImport.ts';
 
-const SONG_COUNT = Number(process.argv[2] ?? 5000);
+const args = process.argv.slice(2);
+const outputPath = join(import.meta.dirname, '..', 'data', 'catalog.demo.csv');
+
+// File có thể đang mở trong Excel và bị khóa, nên không ghi lại khi đã có sẵn.
+if (args.includes('--if-missing') && existsSync(outputPath)) {
+  console.log('Đã có data/catalog.demo.csv, dùng lại file này.');
+  process.exit(0);
+}
+
+const SONG_COUNT = Number(args.find((arg) => !arg.startsWith('--')) ?? 5000);
 const ARTIST_COUNT = 200;
 const DEMO_SOURCE = 'DEMO - không phải dữ liệu thật';
 
@@ -38,7 +47,6 @@ for (let index = 1; index <= SONG_COUNT; index += 1) {
   rows.push(cells.map((cell) => `"${cell.replace(/"/g, '""')}"`).join(','));
 }
 
-const outputPath = join(import.meta.dirname, '..', 'data', 'catalog.demo.csv');
 mkdirSync(join(import.meta.dirname, '..', 'data'), { recursive: true });
 writeFileSync(outputPath, `${rows.join('\n')}\n`);
 console.log(`Đã tạo ${SONG_COUNT} bài demo vào data/catalog.demo.csv`);

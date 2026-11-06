@@ -1,0 +1,27 @@
+{
+  "id": "mau-1",
+  "state": 1,
+  "duration": 215,
+  "results": {
+    "music": [
+      {
+        "played_duration": 180,
+        "result": {
+          "title": "Bài Mẫu Thương Mại (Official)",
+          "artists": [{ "name": "Ca Sĩ Mẫu" }],
+          "label": "Hãng Đĩa Mẫu",
+          "score": 96,
+          "external_ids": { "isrc": "VNMAU0000001" },
+          "rights_claim": [
+            {
+              "distributor": { "name": "Nhà Phân Phối Mẫu" },
+              "rights_owners": [{ "name": "Hãng Đĩa Mẫu", "share_percentage": 100 }],
+              "rights_claim_policy": "Monetize",
+              "territories": ["VN"]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
