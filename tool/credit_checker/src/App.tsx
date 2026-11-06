@@ -2,20 +2,19 @@ import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import {
   BookOpen,
-  Database,
   Check,
   CheckCircle2,
   Copy,
+  Database,
   ExternalLink,
+  FileSearch,
   Info,
   Library,
-  Music,
-  Scale,
   Search,
   ShieldAlert,
   ShieldCheck,
   ShieldX,
-  User,
+  TriangleAlert,
 } from 'lucide-react';
 import { analyzeMusic, buildCatalogIndex, USE_CASE_LABELS } from './analyzer';
 import type { AnalysisResult, CatalogIndex, UseCase } from './analyzer';
@@ -30,10 +29,32 @@ interface MusicQuery {
   artist: string;
 }
 
-const TABS: { id: TabId; label: string; icon: ReactNode }[] = [
-  { id: 'checker', label: 'Kiểm tra', icon: <Search className="h-4 w-4" /> },
-  { id: 'guide', label: 'Checklist & Pháp lý', icon: <BookOpen className="h-4 w-4" /> },
-  { id: 'library', label: 'Thư viện nhạc an toàn', icon: <Library className="h-4 w-4" /> },
+interface CatalogState {
+  index: CatalogIndex;
+  importedCount: number;
+  generatedAt?: string;
+  isDemo: boolean;
+}
+
+const TABS: { id: TabId; label: string; description: string; icon: ReactNode }[] = [
+  {
+    id: 'checker',
+    label: 'Kiểm tra bài hát',
+    description: 'Tra cứu tình trạng bản quyền trước khi đưa một bài nhạc vào sản phẩm.',
+    icon: <Search className="h-4 w-4" />,
+  },
+  {
+    id: 'guide',
+    label: 'Quy trình & Pháp lý',
+    description: 'Các bước cần hoàn tất và khái niệm cần nắm trước khi đăng nội dung.',
+    icon: <BookOpen className="h-4 w-4" />,
+  },
+  {
+    id: 'library',
+    label: 'Nguồn nhạc',
+    description: 'Danh sách nguồn nhạc tham khảo. Đọc điều khoản hiện hành trước khi sử dụng.',
+    icon: <Library className="h-4 w-4" />,
+  },
 ];
 
 const PRESETS: MusicQuery[] = [
@@ -43,22 +64,30 @@ const PRESETS: MusicQuery[] = [
   { title: 'Shape of You', artist: 'Ed Sheeran' },
 ];
 
-const STATUS_STYLES: Record<CopyrightStatus, { badge: string; icon: ReactNode }> = {
+const STATUS_STYLES: Record<CopyrightStatus, { accent: string; badge: string; decision: string; icon: ReactNode }> = {
   SAFE: {
-    badge: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
-    icon: <ShieldCheck className="h-5 w-5" />,
+    accent: 'border-l-emerald-600',
+    badge: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
+    decision: 'Được dùng bản phổ, cần kiểm tra bản thu',
+    icon: <ShieldCheck className="h-4 w-4" />,
   },
   LICENSED: {
-    badge: 'border-sky-500/40 bg-sky-500/10 text-sky-300',
-    icon: <ShieldCheck className="h-5 w-5" />,
+    accent: 'border-l-sky-600',
+    badge: 'bg-sky-50 text-sky-800 ring-sky-200',
+    decision: 'Được dùng trong phạm vi giấy phép',
+    icon: <ShieldCheck className="h-4 w-4" />,
   },
   WARNING: {
-    badge: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
-    icon: <ShieldAlert className="h-5 w-5" />,
+    accent: 'border-l-amber-500',
+    badge: 'bg-amber-50 text-amber-800 ring-amber-200',
+    decision: 'Chỉ được dùng khi đáp ứng điều kiện',
+    icon: <ShieldAlert className="h-4 w-4" />,
   },
   RESTRICTED: {
-    badge: 'border-rose-500/40 bg-rose-500/10 text-rose-300',
-    icon: <ShieldX className="h-5 w-5" />,
+    accent: 'border-l-rose-600',
+    badge: 'bg-rose-50 text-rose-800 ring-rose-200',
+    decision: 'Không dùng khi chưa có giấy phép',
+    icon: <ShieldX className="h-4 w-4" />,
   },
 };
 
@@ -88,13 +117,6 @@ const CHECKLIST_ITEMS = [
   'Đã ghi nguồn đúng mẫu nếu giấy phép yêu cầu',
   'Đã lưu giấy phép và hóa đơn vào hồ sơ dự án',
 ];
-
-interface CatalogState {
-  index: CatalogIndex;
-  importedCount: number;
-  generatedAt?: string;
-  isDemo: boolean;
-}
 
 const BUILT_IN_CATALOG: CatalogState = {
   index: buildCatalogIndex(CATALOG),
@@ -133,49 +155,43 @@ function useCatalog(): CatalogState {
   return catalog;
 }
 
-function CatalogNotice({ catalog }: { catalog: CatalogState }) {
-  if (catalog.isDemo) {
-    return (
-      <p className="mb-6 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-200">
-        <strong>Dữ liệu demo, không phải thông tin bản quyền thật.</strong> {catalog.importedCount.toLocaleString('vi-VN')} bài
-        được tạo tự động để thử khối lượng lớn. Ví dụ, thử nhập "Bài demo 00042" và "Nghệ sĩ demo 042".
-      </p>
-    );
-  }
+function Panel({ children, className = '' }: { children: ReactNode; className?: string }) {
+  return <div className={`rounded-lg border border-slate-200 bg-white ${className}`}>{children}</div>;
+}
+
+function SectionTitle({ children }: { children: ReactNode }) {
+  return <h3 className="text-sm font-semibold text-slate-900">{children}</h3>;
+}
+
+function DataStatus({ catalog }: { catalog: CatalogState }) {
   const updatedAt = catalog.generatedAt && new Date(catalog.generatedAt).toLocaleDateString('vi-VN');
+  const sourceLabel = catalog.isDemo ? 'Dữ liệu demo' : catalog.importedCount > 0 ? 'Dữ liệu của đội' : 'Dữ liệu mẫu';
+
   return (
-    <p className="mb-6 flex items-center gap-2 text-xs text-slate-400">
-      <Database className="h-3.5 w-3.5" />
-      {catalog.importedCount > 0
-        ? `Dữ liệu của đội: ${catalog.importedCount.toLocaleString('vi-VN')} bài, cập nhật ${updatedAt}.`
-        : 'Đang dùng dữ liệu mẫu rất nhỏ kèm theo app.'}
-    </p>
+    <div className="text-xs text-slate-500">
+      <p className="flex items-center gap-1.5 font-medium text-slate-700">
+        <Database className="h-3.5 w-3.5" />
+        {sourceLabel}
+      </p>
+      <p className="mt-1">
+        {catalog.importedCount > 0
+          ? `${catalog.importedCount.toLocaleString('vi-VN')} bài, cập nhật ${updatedAt}`
+          : 'Chỉ gồm vài bài minh họa'}
+      </p>
+    </div>
   );
 }
 
-function ResourceLink({ resource }: { resource: MusicResource }) {
+function DemoBanner({ count }: { count: number }) {
   return (
-    <a
-      href={resource.url}
-      target="_blank"
-      rel="noreferrer"
-      className="block rounded-xl border border-slate-800 bg-slate-950 p-3 transition hover:border-indigo-500"
-    >
-      <span className="flex items-center gap-2 text-sm font-medium text-slate-100">
-        {resource.name}
-        <ExternalLink className="h-3.5 w-3.5 text-slate-500" />
-      </span>
-      <span className="mt-1 block text-xs text-slate-400">{resource.note}</span>
-    </a>
-  );
-}
-
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section>
-      <h4 className="mb-2 text-sm font-semibold text-indigo-300">{title}</h4>
-      {children}
-    </section>
+    <div className="flex gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-900 lg:px-8">
+      <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+      <p>
+        <strong className="font-semibold">Dữ liệu demo, không phải thông tin bản quyền thật.</strong>{' '}
+        {count.toLocaleString('vi-VN')} bài được tạo tự động để thử khối lượng lớn. Ví dụ, thử nhập "Bài demo 00042" và
+        "Nghệ sĩ demo 042".
+      </p>
+    </div>
   );
 }
 
@@ -192,86 +208,97 @@ function AttributionHelper({ text }: { text: string }) {
   };
 
   return (
-    <Section title="Đoạn ghi nguồn cho phần mô tả">
-      <pre className="overflow-x-auto whitespace-pre-wrap rounded-xl border border-slate-800 bg-slate-950 p-3 text-xs text-slate-300">
+    <section className="space-y-2 px-5 py-4">
+      <div className="flex items-center justify-between gap-3">
+        <SectionTitle>Đoạn ghi nguồn</SectionTitle>
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+        >
+          {copyState === 'copied' ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+          {copyState === 'copied' ? 'Đã sao chép' : 'Sao chép'}
+        </button>
+      </div>
+      <pre className="overflow-x-auto whitespace-pre-wrap rounded-md bg-slate-50 p-3 font-mono text-xs text-slate-700">
         {text}
       </pre>
-      <button
-        type="button"
-        onClick={handleCopy}
-        className="mt-2 inline-flex items-center gap-2 rounded-lg bg-slate-800 px-3 py-2 text-xs font-medium text-slate-100 transition hover:bg-slate-700"
-      >
-        {copyState === 'copied' ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-        {copyState === 'copied' ? 'Đã sao chép' : 'Sao chép đoạn ghi nguồn'}
-      </button>
       {copyState === 'failed' && (
-        <p className="mt-2 text-xs text-rose-300">Trình duyệt chặn sao chép. Hãy bôi đen đoạn trên rồi sao chép thủ công.</p>
+        <p className="text-xs text-rose-700">Trình duyệt chặn sao chép. Hãy bôi đen đoạn trên rồi sao chép thủ công.</p>
       )}
-    </Section>
+    </section>
   );
 }
 
-function ResultCard({ result }: { result: AnalysisResult }) {
+function ResultRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="grid grid-cols-1 gap-1 px-5 py-3 text-sm xl:grid-cols-[150px_minmax(0,1fr)] xl:gap-4">
+      <dt className="text-slate-500">{label}</dt>
+      <dd className="text-slate-800">{children}</dd>
+    </div>
+  );
+}
+
+function ResultCard({ result, useCase }: { result: AnalysisResult; useCase: UseCase }) {
   const style = STATUS_STYLES[result.status];
 
   return (
-    <article className="mt-6 space-y-5 rounded-2xl border border-slate-800 bg-slate-900 p-6" aria-live="polite">
-      <header className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <h3 className="text-lg font-bold text-slate-100">
+    <Panel className="divide-y divide-slate-200 overflow-hidden">
+      <header className={`border-l-4 px-5 py-4 ${style.accent}`} aria-live="polite">
+        <p className="text-xs text-slate-500">
           {result.title}
           {result.artist && ` - ${result.artist}`}
-        </h3>
-        <span className={`inline-flex w-fit items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-semibold ${style.badge}`}>
-          {style.icon}
-          {result.statusLabel}
-        </span>
+        </p>
+        <h3 className="mt-1 text-lg font-semibold text-slate-900">{style.decision}</h3>
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+          <span className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 font-medium ring-1 ring-inset ${style.badge}`}>
+            {style.icon}
+            {result.statusLabel}
+          </span>
+          <span>Rủi ro: {result.riskLevel}</span>
+          <span aria-hidden="true">·</span>
+          <span>{USE_CASE_LABELS[useCase]}</span>
+        </div>
       </header>
 
-      <dl className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
-        <div className="rounded-xl bg-slate-950 p-3">
-          <dt className="text-xs text-slate-500">Loại giấy phép</dt>
-          <dd className="mt-1 text-slate-200">{result.licenseType}</dd>
-        </div>
-        <div className="rounded-xl bg-slate-950 p-3">
-          <dt className="text-xs text-slate-500">Mức rủi ro với mục đích đã chọn</dt>
-          <dd className="mt-1 text-slate-200">{result.riskLevel}</dd>
-        </div>
-        <div className="rounded-xl bg-slate-950 p-3">
-          <dt className="text-xs text-slate-500">Quyền sáng tác (Composition)</dt>
-          <dd className="mt-1 text-slate-300">{result.compositionRights}</dd>
-        </div>
-        <div className="rounded-xl bg-slate-950 p-3">
-          <dt className="text-xs text-slate-500">Quyền bản thu (Master Recording)</dt>
-          <dd className="mt-1 text-slate-300">{result.masterRights}</dd>
-        </div>
+      <dl className="divide-y divide-slate-100">
+        <ResultRow label="Loại giấy phép">{result.licenseType}</ResultRow>
+        <ResultRow label="Quyền sáng tác">{result.compositionRights}</ResultRow>
+        <ResultRow label="Quyền bản thu">{result.masterRights}</ResultRow>
+        <ResultRow label="Căn cứ">{result.sourceNote}</ResultRow>
       </dl>
-
-      <p className="flex gap-2 text-xs text-slate-400">
-        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-        {result.sourceNote}
-      </p>
 
       {result.attribution && <AttributionHelper text={result.attribution} />}
 
-      <Section title="Việc cần làm">
-        <ol className="space-y-2 text-sm text-slate-300">
-          {result.steps.map((step, index) => (
-            <li key={step} className="flex gap-2">
-              <span className="font-semibold text-indigo-400">{index + 1}.</span>
-              {step}
-            </li>
+      <section className="space-y-2 px-5 py-4">
+        <SectionTitle>Việc cần làm</SectionTitle>
+        <ol className="list-decimal space-y-1.5 pl-5 text-sm text-slate-700 marker:text-slate-400">
+          {result.steps.map((step) => (
+            <li key={step}>{step}</li>
           ))}
         </ol>
-      </Section>
+      </section>
 
-      <Section title="Nguồn nhạc thay thế">
-        <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+      <section className="space-y-2 px-5 py-4">
+        <SectionTitle>Nguồn nhạc thay thế</SectionTitle>
+        <ul className="flex flex-wrap gap-x-4 gap-y-1.5 text-sm">
           {result.alternatives.map((resource) => (
-            <ResourceLink key={resource.name} resource={resource} />
+            <li key={resource.name}>
+              <a
+                href={resource.url}
+                target="_blank"
+                rel="noreferrer"
+                title={resource.note}
+                className="inline-flex items-center gap-1 text-brand-700 hover:underline"
+              >
+                {resource.name}
+                <ExternalLink className="h-3 w-3" />
+              </a>
+            </li>
           ))}
-        </div>
-      </Section>
-    </article>
+        </ul>
+      </section>
+    </Panel>
   );
 }
 
@@ -286,6 +313,17 @@ function CheckerTab({ catalogIndex }: { catalogIndex: CatalogIndex }) {
     [query, useCase, catalogIndex],
   );
 
+  // Sửa thông tin bài là xóa kết quả cũ, để không đọc nhầm kết quả của bài trước cho bài mới.
+  const handleTitleChange = (value: string) => {
+    setSongTitle(value);
+    setQuery(null);
+  };
+
+  const handleArtistChange = (value: string) => {
+    setArtistName(value);
+    setQuery(null);
+  };
+
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
     if (songTitle.trim()) {
@@ -299,78 +337,85 @@ function CheckerTab({ catalogIndex }: { catalogIndex: CatalogIndex }) {
     setQuery(preset);
   };
 
-  const inputClass =
-    'w-full rounded-xl border border-slate-700 bg-slate-950 py-3 pl-10 pr-3 text-sm text-slate-100 outline-none focus:border-indigo-500';
+  const fieldClass =
+    'mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-brand-600 focus:ring-1 focus:ring-brand-600';
 
   return (
-    <>
-      <form onSubmit={handleSubmit} className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900 p-6">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <label className="relative block">
-            <span className="sr-only">Tên bài hát</span>
-            <Music className="absolute left-3 top-3.5 h-4 w-4 text-slate-500" />
+    <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[340px_minmax(0,1fr)]">
+      <Panel className="p-5">
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <label className="block text-sm font-medium text-slate-700">
+            Tên bài hát <span className="text-rose-600">*</span>
             <input
               type="text"
-              placeholder="Tên bài hát..."
               value={songTitle}
-              onChange={(event) => setSongTitle(event.target.value)}
-              className={inputClass}
+              onChange={(event) => handleTitleChange(event.target.value)}
+              className={fieldClass}
               required
             />
           </label>
-          <label className="relative block">
-            <span className="sr-only">Tác giả hoặc nghệ sĩ</span>
-            <User className="absolute left-3 top-3.5 h-4 w-4 text-slate-500" />
+          <label className="block text-sm font-medium text-slate-700">
+            Tác giả / Nghệ sĩ
             <input
               type="text"
-              placeholder="Tác giả / Nghệ sĩ..."
               value={artistName}
-              onChange={(event) => setArtistName(event.target.value)}
-              className={inputClass}
+              onChange={(event) => handleArtistChange(event.target.value)}
+              className={fieldClass}
             />
+            <span className="mt-1 block text-xs font-normal text-slate-500">
+              Thiếu thông tin này thì không đối chiếu được với dữ liệu.
+            </span>
           </label>
-        </div>
-
-        <label className="block text-sm text-slate-300">
-          Mục đích sử dụng
-          <select
-            value={useCase}
-            onChange={(event) => setUseCase(event.target.value as UseCase)}
-            className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 p-3 text-sm text-slate-100 outline-none focus:border-indigo-500"
-          >
-            {Object.entries(USE_CASE_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <button
-          type="submit"
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 py-3 text-sm font-medium text-white transition hover:bg-indigo-500"
-        >
-          <Search className="h-4 w-4" />
-          Phân tích bản quyền
-        </button>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-slate-500">Thử nhanh:</span>
-          {PRESETS.map((preset) => (
-            <button
-              key={preset.title}
-              type="button"
-              onClick={() => handlePreset(preset)}
-              className="rounded-lg border border-slate-700 px-2.5 py-1 text-xs text-slate-300 transition hover:border-indigo-500"
+          <label className="block text-sm font-medium text-slate-700">
+            Mục đích sử dụng
+            <select
+              value={useCase}
+              onChange={(event) => setUseCase(event.target.value as UseCase)}
+              className={fieldClass}
             >
-              {preset.title} - {preset.artist}
-            </button>
-          ))}
-        </div>
-      </form>
+              {Object.entries(USE_CASE_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="submit"
+            className="flex w-full items-center justify-center gap-2 rounded-md bg-brand-700 px-3 py-2 text-sm font-medium text-white hover:bg-brand-800"
+          >
+            <Search className="h-4 w-4" />
+            Kiểm tra
+          </button>
+        </form>
 
-      {result && <ResultCard result={result} />}
-    </>
+        <div className="mt-4 border-t border-slate-100 pt-3">
+          <p className="text-xs text-slate-500">Ví dụ</p>
+          <div className="mt-1.5 flex flex-col items-start gap-1">
+            {PRESETS.map((preset) => (
+              <button
+                key={preset.title}
+                type="button"
+                onClick={() => handlePreset(preset)}
+                className="text-left text-xs text-brand-700 hover:underline"
+              >
+                {preset.title} - {preset.artist}
+              </button>
+            ))}
+          </div>
+        </div>
+      </Panel>
+
+      {result ? (
+        <ResultCard result={result} useCase={useCase} />
+      ) : (
+        <Panel className="flex flex-col items-center px-6 py-16 text-center">
+          <FileSearch className="h-8 w-8 text-slate-300" />
+          <p className="mt-3 text-sm font-medium text-slate-700">Chưa có kết quả</p>
+          <p className="mt-1 text-sm text-slate-500">Nhập thông tin bài hát để xem tình trạng bản quyền.</p>
+        </Panel>
+      )}
+    </div>
   );
 }
 
@@ -384,42 +429,59 @@ function GuideTab() {
   };
 
   return (
-    <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-      <section className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
-        <h2 className="mb-4 flex items-center gap-2 font-semibold">
-          <CheckCircle2 className="h-5 w-5 text-indigo-400" />
+    <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
+      <Panel className="p-5">
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+          <CheckCircle2 className="h-4 w-4 text-brand-700" />
           Checklist trước khi đăng ({checkedItems.length}/{CHECKLIST_ITEMS.length})
         </h2>
-        <ul className="space-y-3">
+        <ul className="mt-4 space-y-3">
           {CHECKLIST_ITEMS.map((item) => (
             <li key={item}>
-              <label className="flex items-start gap-2 text-sm text-slate-300">
+              <label className="flex items-start gap-2 text-sm text-slate-700">
                 <input
                   type="checkbox"
                   checked={checkedItems.includes(item)}
                   onChange={() => toggleItem(item)}
-                  className="mt-0.5 accent-indigo-500"
+                  className="mt-0.5 accent-brand-700"
                 />
                 {item}
               </label>
             </li>
           ))}
         </ul>
-      </section>
+      </Panel>
 
-      <section className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900 p-6">
-        <h2 className="flex items-center gap-2 font-semibold">
-          <BookOpen className="h-5 w-5 text-indigo-400" />
+      <Panel className="divide-y divide-slate-100">
+        <h2 className="flex items-center gap-2 p-5 text-sm font-semibold text-slate-900">
+          <BookOpen className="h-4 w-4 text-brand-700" />
           Khái niệm cần biết
         </h2>
         {LEGAL_TOPICS.map((topic) => (
-          <div key={topic.title}>
-            <h3 className="text-sm font-semibold text-indigo-300">{topic.title}</h3>
-            <p className="mt-1 text-sm text-slate-400">{topic.body}</p>
+          <div key={topic.title} className="p-5">
+            <SectionTitle>{topic.title}</SectionTitle>
+            <p className="mt-1 text-sm text-slate-600">{topic.body}</p>
           </div>
         ))}
-      </section>
+      </Panel>
     </div>
+  );
+}
+
+function ResourceRow({ resource }: { resource: MusicResource }) {
+  return (
+    <li className="flex flex-col gap-0.5 px-5 py-3 md:flex-row md:items-center md:justify-between md:gap-6">
+      <a
+        href={resource.url}
+        target="_blank"
+        rel="noreferrer"
+        className="inline-flex shrink-0 items-center gap-1 text-sm font-medium text-brand-700 hover:underline"
+      >
+        {resource.name}
+        <ExternalLink className="h-3 w-3" />
+      </a>
+      <span className="text-sm text-slate-600 md:text-right">{resource.note}</span>
+    </li>
   );
 }
 
@@ -427,16 +489,15 @@ function LibraryTab() {
   return (
     <div className="space-y-6">
       {RESOURCE_GROUPS.map((group) => (
-        <section key={group.title} className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
-          <h2 className="mb-3 font-semibold">{group.title}</h2>
-          <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+        <Panel key={group.title}>
+          <h2 className="border-b border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900">{group.title}</h2>
+          <ul className="divide-y divide-slate-100">
             {group.resources.map((resource) => (
-              <ResourceLink key={resource.name} resource={resource} />
+              <ResourceRow key={resource.name} resource={resource} />
             ))}
-          </div>
-        </section>
+          </ul>
+        </Panel>
       ))}
-      <p className="text-xs text-slate-500">Điều khoản của từng nguồn có thể thay đổi, hãy đọc lại trước khi dùng.</p>
     </div>
   );
 }
@@ -444,26 +505,40 @@ function LibraryTab() {
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>('checker');
   const catalog = useCatalog();
+  const currentTab = TABS.find((tab) => tab.id === activeTab) ?? TABS[0];
 
   return (
-    <div className="min-h-screen bg-slate-950 px-4 py-6 font-sans text-slate-100 md:px-6">
-      <header className="mx-auto max-w-5xl border-b border-slate-800 pb-5">
-        <div className="flex items-center gap-3">
-          <Scale className="h-7 w-7 text-indigo-500" />
+    <div className="min-h-screen bg-slate-50 text-slate-900">
+      <aside className="flex flex-col border-b border-slate-200 bg-white lg:fixed lg:inset-y-0 lg:w-60 lg:border-b-0 lg:border-r">
+        <div className="h-1 shrink-0 bg-linear-to-r from-brand-400 to-brand-600" />
+        <div className="flex items-center gap-2.5 px-4 py-3 lg:flex-col lg:items-start lg:gap-3 lg:px-5 lg:py-5">
+          <img
+            src={`${import.meta.env.BASE_URL}brand/quoc-duy-mark.png`}
+            alt=""
+            className="h-9 w-9 shrink-0 rounded-md lg:hidden"
+          />
+          <img
+            src={`${import.meta.env.BASE_URL}brand/quoc-duy-logo.png`}
+            alt="Logo Quốc Duy"
+            className="hidden w-[131px] rounded-xl lg:block"
+          />
           <div>
-            <h1 className="text-xl font-bold">Music Copyright Checker</h1>
-            <p className="text-xs text-slate-400">Tra cứu theo luật cố định và dữ liệu mẫu, không phải tư vấn pháp lý.</p>
+            <p className="text-sm font-semibold leading-tight">Kiểm tra bản quyền nhạc</p>
+            <p className="text-xs text-slate-500">Công cụ nội bộ</p>
           </div>
         </div>
-        <nav className="mt-4 flex flex-wrap gap-2">
+
+        <nav className="flex gap-1 overflow-x-auto px-3 pb-2 lg:flex-1 lg:flex-col lg:overflow-visible lg:pb-0">
           {TABS.map((tab) => (
             <button
               key={tab.id}
               type="button"
-              aria-pressed={activeTab === tab.id}
+              aria-current={activeTab === tab.id ? 'page' : undefined}
               onClick={() => setActiveTab(tab.id)}
-              className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition ${
-                activeTab === tab.id ? 'bg-indigo-600 text-white' : 'bg-slate-900 text-slate-300 hover:bg-slate-800'
+              className={`inline-flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-sm ${
+                activeTab === tab.id
+                  ? 'bg-brand-50 font-medium text-brand-800'
+                  : 'text-slate-600 hover:bg-slate-100'
               }`}
             >
               {tab.icon}
@@ -471,21 +546,44 @@ export default function App() {
             </button>
           ))}
         </nav>
-      </header>
 
-      <main className="mx-auto mt-6 max-w-5xl">
-        {/* Giữ các tab luôn được mount để đổi tab không làm mất form, kết quả và checklist. */}
-        <div hidden={activeTab !== 'checker'}>
-          <CatalogNotice catalog={catalog} />
-          <CheckerTab catalogIndex={catalog.index} />
+        <div className="hidden border-t border-slate-200 p-5 lg:block">
+          <DataStatus catalog={catalog} />
         </div>
-        <div hidden={activeTab !== 'guide'}>
-          <GuideTab />
-        </div>
-        <div hidden={activeTab !== 'library'}>
-          <LibraryTab />
-        </div>
-      </main>
+      </aside>
+
+      <div className="flex min-h-screen flex-col lg:pl-60">
+        {catalog.isDemo && <DemoBanner count={catalog.importedCount} />}
+
+        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 lg:px-8">
+          <header className="mb-6">
+            <h1 className="text-xl font-semibold">{currentTab.label}</h1>
+            <p className="mt-1 text-sm text-slate-600">{currentTab.description}</p>
+          </header>
+
+          {/* Giữ các tab luôn được mount để đổi tab không làm mất form, kết quả và checklist. */}
+          <div hidden={activeTab !== 'checker'}>
+            <CheckerTab catalogIndex={catalog.index} />
+          </div>
+          <div hidden={activeTab !== 'guide'}>
+            <GuideTab />
+          </div>
+          <div hidden={activeTab !== 'library'}>
+            <LibraryTab />
+          </div>
+        </main>
+
+        <footer className="mx-auto w-full max-w-6xl px-4 pb-6 lg:px-8">
+          <p className="flex gap-1.5 text-xs text-slate-500">
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            Kết quả tra theo luật cố định và dữ liệu nội bộ, không phải tư vấn pháp lý và không thay thế giấy phép. Không chắc
+            chắn thì hỏi bộ phận pháp lý.
+          </p>
+          <div className="mt-3 lg:hidden">
+            <DataStatus catalog={catalog} />
+          </div>
+        </footer>
+      </div>
     </div>
   );
 }

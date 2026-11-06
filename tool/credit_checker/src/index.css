@@ -1,5 +1,18 @@
 @import 'tailwindcss';
 
+/* Màu đo từ logo Quốc Duy: chuyển từ brand-400 sang brand-600. Chữ trắng đặt trên brand-700. */
+@theme {
+  --color-brand-50: #eaf4ff;
+  --color-brand-400: #3aadfc;
+  --color-brand-600: #1f70fd;
+  --color-brand-700: #1a66e8;
+  --color-brand-800: #1557cc;
+}
+
+:root {
+  color-scheme: light;
+}
+
 body {
-  background-color: #020617;
+  background-color: #f8fafc;
 }
