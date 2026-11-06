@@ -6,8 +6,8 @@ Công cụ của mảng Content Hub; luật chung ở `CLAUDE.md` gốc repo. Ch
 ## Lệnh
 
 ```bash
-python3 -m unittest discover -s tests   # kiểm thử, dùng máy chủ ACRCloud giả
-python3 audit.py --help                 # các lệnh con: list-videos, sample, create-container, use-container, submit, fetch, report
+python3 -m unittest discover -s tests   # kiểm thử, dùng máy chủ ACRCloud và AudD giả
+python3 audit.py --help                 # các lệnh con: list-videos, sample, create-container, use-container, submit, fetch, report, identify, identify-file
 ```
 
 Python 3.11 trở lên, chỉ dùng thư viện chuẩn. Cần `ffmpeg` nếu quét file video trên máy.
@@ -15,7 +15,10 @@ Python 3.11 trở lên, chỉ dùng thư viện chuẩn. Cần `ffmpeg` nếu qu
 ## Kiến trúc
 
 - `audit.py`: lệnh dòng lệnh. Trạng thái lưu trong `out/` để chạy tiếp được khi bị ngắt.
+- `.claude/skills/identify-music/`: skill để agent gọi lệnh `identify` khi có người dán link YouTube.
 - `music_audit/acrcloud.py`: gọi API ACRCloud. `music_audit/youtube.py`: lấy danh sách video từ YouTube Data API.
+- `music_audit/audd.py`: gọi API AudD cho `identify` và `identify-file`. AudD không phát hiện "không có nhạc", nên không khớp là `hold`.
+- `tool/credit_checker/`: web app tra cứu bản quyền, gọi lệnh `identify` qua server của Vite.
 - `music_audit/evaluate.py`: phân loại kết quả, tính tỷ lệ kèm khoảng tin cậy, viết báo cáo.
 - `music_audit/common.py`: đọc `.env`, đọc và kiểm tra danh sách video.
 

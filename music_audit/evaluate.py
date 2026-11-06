@@ -29,6 +29,13 @@ CAUGHT_UNVERIFIED = "caught_unverified"
 HELD = "held"
 ESCAPED = "escaped"
 
+IDENTIFY_NOTES = {
+    BLOCK: "Máy nhận ra bài nhạc trong video. Chỉ dùng được khi có giấy phép cho đúng các bài này.",
+    HOLD: "Có nhạc hoặc không rõ, nhưng không nhận ra bài. Đây là chưa biết, không phải an toàn: cần hỏi nguồn nhạc.",
+    PASS_NO_MUSIC: "Máy kết luận không có nhạc. Kết quả quét không phải bằng chứng về bản quyền.",
+    ERROR: "ACRCloud không quét được video này. Chưa có kết luận gì về nhạc trong video.",
+}
+
 
 @dataclass
 class Scan:
@@ -135,6 +142,19 @@ def gate_decision(scan, row):
             return PASS_LICENSED
         return BLOCK
     return PASS_NO_MUSIC if scan.music == "no" else HOLD
+
+
+def identify_summary(scan):
+    """Tóm tắt kết quả quét một video. Không có dòng nhãn nên không video nào được qua vì có giấy phép."""
+    decision = gate_decision(scan, {})
+    tracks = [{key: value for key, value in track.items() if key != "artist_names"} for track in scan.tracks]
+    return {
+        "decision": decision,
+        "note": IDENTIFY_NOTES[decision],
+        "music": scan.music,
+        "duration_seconds": scan.duration,
+        "tracks": tracks,
+    }
 
 
 def commercial_outcome(scan, row):

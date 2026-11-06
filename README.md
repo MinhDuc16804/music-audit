@@ -69,6 +69,39 @@ python3 audit.py report
 
 Kết quả nằm ở `out/report.md` (báo cáo) và `out/results.csv` (từng video).
 
+## Nhận diện nhạc trong một video
+
+Dán một link là có kết quả, không cần `testset.csv` hay `create-container`. Chỉ cần khóa trong `.env`: nếu có
+`ACRCLOUD_ACCESS_TOKEN` thì lệnh dùng ACRCloud, nếu không thì dùng `AUDD_API_TOKEN`.
+
+```bash
+python3 audit.py identify "https://www.youtube.com/watch?v=VIDEO_ID"
+```
+
+Với AudD có thể quét trực tiếp một file âm thanh hoặc video. Quét bằng link cần gói AudD trả phí, tải file thì dùng được với gói
+miễn phí:
+
+```bash
+python3 audit.py identify-file duong/dan/video.mp4
+```
+
+Khác biệt khi dùng AudD:
+
+- AudD không phát hiện "không có nhạc", nên không khớp bài nào luôn là `hold`, không bao giờ là `pass_no_music`.
+- Mỗi 12 giây âm thanh tính 1 yêu cầu. Mỗi lần quét tối đa 1 giờ đầu, đổi bằng `AUDD_MAX_CHUNKS`.
+- Kết quả được lưu ở `out/audd/`, quét lại cùng video hoặc cùng file không tốn thêm, trừ khi dùng `--rescan`.
+- AudD chỉ trả hãng phát hành, không trả dữ liệu chủ sở hữu quyền.
+
+Lệnh in JSON gồm `status`, `decision`, `note` và danh sách bài trong `tracks`. Ý nghĩa của `decision` giống bảng ở phần
+[Đọc kết quả](#đọc-kết-quả); `pass_licensed` không xuất hiện vì lệnh này không biết video có giấy phép hay không.
+
+- Chỉ nhận link của một video. Link kênh và playlist bị từ chối, `list=` trong link bị bỏ đi, để không quét nhầm cả danh sách.
+- Quét chưa xong sau 100 giây thì trả về `status: processing`. Chạy lại đúng lệnh đó để lấy tiếp, video không bị gửi lại.
+- Lần đầu chạy, lệnh tự tạo container ở `ap-southeast-1` nếu chưa có. Muốn đổi thì chạy `create-container` trước.
+- `--rescan` gửi quét lại video đã quét và tốn thêm lượt quét.
+
+Agent trong Claude Code tự dùng lệnh này qua skill `identify-music` khi mở repo ở folder này.
+
 ## Các cột trong testset.csv
 
 | Cột | Nội dung |
@@ -121,7 +154,9 @@ Máy chủ giả trong `tests/test_flow.py` mô phỏng API theo tài liệu. Kh
 | File | Vai trò |
 |---|---|
 | `audit.py` | Các lệnh |
+| `.claude/skills/identify-music/` | Skill để agent gọi lệnh `identify` |
 | `music_audit/acrcloud.py` | Gọi File Scanning API |
+| `music_audit/audd.py` | Gọi Enterprise API của AudD và đọc kết quả |
 | `music_audit/youtube.py` | Lấy danh sách video qua YouTube Data API |
 | `music_audit/evaluate.py` | Đọc kết quả, quyết định của cổng kiểm tra, báo cáo |
 | `music_audit/common.py` | Đọc `.env`, CSV và kiểm tra danh sách video |

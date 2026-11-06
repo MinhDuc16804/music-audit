@@ -28,6 +28,26 @@ npm test
 npm run build
 ```
 
+## Kiểm tra một video YouTube
+
+Tab **Kiểm tra video** nhận một link video hoặc một file, gọi lệnh `identify` của `music-audit` qua server của Vite rồi đối chiếu
+từng bài với dữ liệu giấy phép. Khóa AudD nằm trong `.env` của `music-audit`, trình duyệt không thấy được, nên tab này chỉ chạy qua
+`npm run dev` hoặc `npm run preview`, không chạy khi đưa `dist/` lên trang tĩnh.
+
+Quét bằng link cần gói AudD trả phí, và tài liệu AudD chưa xác nhận có nhận link YouTube. Tải file lên thì dùng được với gói miễn
+phí. File được gửi tới AudD để quét, nên hãy cân nhắc với nội dung chưa phát hành.
+
+| Kết quả | Nghĩa |
+|---|---|
+| Mọi bài nhận ra đều có giấy phép | Mọi bài đều `LICENSED`, đúng mục đích và còn hạn. Máy vẫn có thể bỏ sót nhạc khác |
+| Có nhạc cần giấy phép | Có ít nhất một bài chưa có giấy phép phù hợp |
+| Chưa biết, cần hỏi nguồn nhạc | Không nhận ra bài. AudD không phát hiện "không có nhạc", nên video không khớp bài nào luôn ở mức này |
+| Máy không thấy nhạc | Chỉ có với ACRCloud. Không phải bằng chứng về bản quyền |
+
+AudD tính 1 yêu cầu cho mỗi 12 giây âm thanh, nên video 10 phút tốn khoảng 50 yêu cầu. Để tránh hóa đơn bất ngờ, mỗi lần quét tối đa
+60 phút đầu, đổi bằng biến `AUDD_MAX_CHUNKS` trong `.env`. Kiểm tra lại cùng video hoặc cùng file chỉ lấy kết quả cũ, không tốn thêm.
+Nếu không tìm thấy Python, đặt biến môi trường `MUSIC_AUDIT_PYTHON`.
+
 ## Nhập dữ liệu bài hát
 
 Trong PowerShell, thay `npm` bằng `npm.cmd` nếu máy chặn script.

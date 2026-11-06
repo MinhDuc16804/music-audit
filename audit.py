@@ -2,6 +2,7 @@
 """Bộ đo độ tin cậy của ACRCloud trên video của kênh. Xem README.md."""
 
 import argparse
+import hashlib
 import json
 import os
 import random
@@ -13,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from music_audit.acrcloud import AcrClient, AcrError
+from music_audit.audd import CHUNK_SECONDS, AuddClient, AuddError, parse_audd
 from music_audit.common import (
     TESTSET_COLUMNS,
     load_env,
@@ -21,14 +23,17 @@ from music_audit.common import (
     validate_testset,
     write_csv,
 )
-from music_audit.evaluate import build_rows, parse_scan, render_report
-from music_audit.youtube import YoutubeClient, YoutubeError
+from music_audit.evaluate import ERROR, build_rows, identify_summary, parse_scan, render_report
+from music_audit.youtube import YoutubeClient, YoutubeError, video_url, youtube_video_id
 
 ROOT = Path(__file__).resolve().parent
 AUDIO_SUFFIXES = {".mp3", ".m4a", ".wav", ".flac", ".aac", ".ogg"}
 VIDEO_COLUMNS = ("channel", "video_id", "url", "title", "published_at", "duration_seconds", "view_count")
 RESULT_COLUMNS = TESTSET_COLUMNS + ("decision", "outcome", "music_detected", "speech_share", "duration_seconds", "tracks")
 FETCH_BATCH = 20
+DEFAULT_CONTAINER_NAME = "music-audit-test"
+DEFAULT_REGION = "ap-southeast-1"
+DEFAULT_AUDD_MAX_CHUNKS = 300  # 1 giờ âm thanh, chặn hóa đơn bất ngờ với file dài
 
 
 class Paths:
@@ -41,6 +46,7 @@ class Paths:
         self.container = self.out / "container.json"
         self.submissions = self.out / "submissions.json"
         self.raw = self.out / "raw"
+        self.audd = self.out / "audd"
         self.report = self.out / "report.md"
         self.results = self.out / "results.csv"
 
@@ -61,6 +67,22 @@ def acr_client():
         os.environ.get("ACRCLOUD_ACCESS_TOKEN", ""),
         base_override=os.environ.get("ACRCLOUD_BASE_OVERRIDE") or None,
     )
+
+
+def uses_audd():
+    """Dùng AudD khi có khóa AudD và chưa điền token ACRCloud."""
+    return bool(os.environ.get("AUDD_API_TOKEN")) and not os.environ.get("ACRCLOUD_ACCESS_TOKEN")
+
+
+def audd_client():
+    return AuddClient(
+        os.environ.get("AUDD_API_TOKEN", ""),
+        base_override=os.environ.get("AUDD_BASE_OVERRIDE") or None,
+    )
+
+
+def audd_max_chunks():
+    return int(os.environ.get("AUDD_MAX_CHUNKS") or DEFAULT_AUDD_MAX_CHUNKS)
 
 
 def load_testset(paths):
@@ -190,6 +212,102 @@ def cmd_fetch(args, paths):
         print("Hết thời gian chờ. Chạy lại lệnh này sau để lấy tiếp.")
 
 
+def _ensure_container(client, paths):
+    container = read_json(paths.container, None)
+    if not container:
+        data = client.create_container(DEFAULT_CONTAINER_NAME, DEFAULT_REGION)
+        container = {"id": data["id"], "region": data.get("region", DEFAULT_REGION)}
+        write_json(paths.container, container)
+    return container
+
+
+def _wait_for_scan(client, container, file_id, paths, timeout, interval):
+    """Đợi đến khi quét xong hoặc hết giờ, trả về bản ghi mới nhất (có thể vẫn đang xử lý)."""
+    raw_path = paths.raw / f"{file_id}.json"
+    deadline = time.monotonic() + timeout
+    while True:
+        saved = read_json(raw_path, None)
+        if saved is None or saved.get("state", 0) == 0:
+            items = client.get_files(container["region"], container["id"], [file_id])
+            if items:
+                saved = items[0]
+                write_json(raw_path, saved)
+        if (saved and saved.get("state", 0) != 0) or time.monotonic() >= deadline:
+            return saved
+        time.sleep(interval)
+
+
+def _print_audd_result(source, source_id, raw, limit):
+    minutes = limit * CHUNK_SECONDS // 60
+    output = {
+        "url": source,
+        "video_id": source_id,
+        "status": "done",
+        "provider": "audd",
+        "scan_note": f"AudD chỉ quét tối đa {minutes} phút đầu của mỗi video.",
+        **identify_summary(parse_audd(raw)),
+    }
+    print(json.dumps(output, ensure_ascii=False, indent=2))
+
+
+def _identify_with_audd(args, paths, video_id, url):
+    cache = paths.audd / f"{video_id}.json"
+    limit = audd_max_chunks()
+    raw = None if args.rescan else read_json(cache, None)
+    if raw is None:
+        raw = audd_client().recognize_url(url, limit)
+        write_json(cache, raw)
+    _print_audd_result(url, video_id, raw, limit)
+
+
+def _file_digest(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def cmd_identify_file(args, paths):
+    path = Path(args.path)
+    if not path.is_file():
+        sys.exit(f"Không tìm thấy file {path.name}")
+    digest = _file_digest(path)
+    cache = paths.audd / f"file-{digest}.json"
+    limit = audd_max_chunks()
+    raw = None if args.rescan else read_json(cache, None)
+    if raw is None:
+        raw = audd_client().recognize_file(path, limit)
+        write_json(cache, raw)
+    _print_audd_result(args.name or path.name, digest[:11], raw, limit)
+
+
+def cmd_identify(args, paths):
+    video_id = youtube_video_id(args.url)
+    if not video_id:
+        sys.exit("Chỉ nhận link của một video YouTube, không nhận link kênh hay playlist.")
+    url = video_url(video_id)
+    if uses_audd():
+        _identify_with_audd(args, paths, video_id, url)
+        return
+    client = acr_client()
+    container = _ensure_container(client, paths)
+    submissions = read_json(paths.submissions, {})
+    if args.rescan or url not in submissions:
+        file_id = client.submit_url(container["region"], container["id"], url)
+        submissions[url] = {"file_id": file_id, "at": datetime.now(timezone.utc).isoformat()}
+        write_json(paths.submissions, submissions)
+
+    raw = _wait_for_scan(client, container, submissions[url]["file_id"], paths, args.timeout, args.interval)
+    output = {"url": url, "video_id": video_id}
+    if raw is None or raw.get("state", 0) == 0:
+        output |= {"status": "processing", "note": "ACRCloud đang quét. Chạy lại lệnh sau ít phút, video không bị gửi lại."}
+    else:
+        summary = identify_summary(parse_scan(raw))
+        output |= {"status": "error" if summary["decision"] == ERROR else "done", **summary}
+    print(json.dumps(output, ensure_ascii=False, indent=2))
+
+
 def cmd_report(_args, paths):
     rows = load_testset(paths)
     submissions = read_json(paths.submissions, {})
@@ -220,8 +338,8 @@ def build_parser():
     command.set_defaults(handler=cmd_sample)
 
     command = commands.add_parser("create-container", help="Tạo container quét trên ACRCloud")
-    command.add_argument("--name", default="music-audit-test")
-    command.add_argument("--region", default="ap-southeast-1", choices=["ap-southeast-1", "eu-west-1", "us-west-2"])
+    command.add_argument("--name", default=DEFAULT_CONTAINER_NAME)
+    command.add_argument("--region", default=DEFAULT_REGION, choices=["ap-southeast-1", "eu-west-1", "us-west-2"])
     command.add_argument("--audio-type", default="linein", choices=["linein", "recorded"])
     command.add_argument("--engine", type=int, default=1, choices=[1, 3], help="1: bản gốc; 3: thêm nhận diện cover")
     command.set_defaults(handler=cmd_create_container)
@@ -242,16 +360,32 @@ def build_parser():
 
     command = commands.add_parser("report", help="Viết báo cáo")
     command.set_defaults(handler=cmd_report)
+
+    command = commands.add_parser("identify", help="Nhận diện nhạc trong một video YouTube, in kết quả dạng JSON")
+    command.add_argument("url", help="Link của một video, không nhận kênh hay playlist")
+    command.add_argument("--timeout", type=float, default=100, help="Số giây chờ kết quả trước khi trả về processing")
+    command.add_argument("--interval", type=float, default=10)
+    command.add_argument("--rescan", action="store_true", help="Gửi quét lại dù video đã quét, tốn thêm lượt quét")
+    command.set_defaults(handler=cmd_identify)
+
+    command = commands.add_parser("identify-file", help="Nhận diện nhạc trong một file bằng AudD, in kết quả dạng JSON")
+    command.add_argument("path", help="File âm thanh hoặc video")
+    command.add_argument("--name", default="", help="Tên hiển thị trong kết quả")
+    command.add_argument("--rescan", action="store_true", help="Gửi quét lại dù file đã quét, tốn thêm lượt quét")
+    command.set_defaults(handler=cmd_identify_file)
     return parser
 
 
 def main():
+    # Console Windows mặc định không phải UTF-8, tên bài tiếng Việt sẽ làm lệnh lỗi khi in ra.
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
     load_env(ROOT / ".env")
     args = build_parser().parse_args()
     paths = Paths(args.workdir)
     try:
         args.handler(args, paths)
-    except (AcrError, YoutubeError) as error:
+    except (AcrError, AuddError, YoutubeError) as error:
         sys.exit(str(error))
 
 

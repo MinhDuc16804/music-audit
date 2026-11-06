@@ -8,6 +8,9 @@ import urllib.request
 
 API_BASE = "https://www.googleapis.com/youtube/v3"
 _DURATION = re.compile(r"^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$")
+_VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
+_VIDEO_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"}
+_VIDEO_PATHS = {"shorts", "embed", "live", "v"}
 
 
 class YoutubeError(Exception):
@@ -21,6 +24,34 @@ def parse_duration(value):
         return 0
     days, hours, minutes, seconds = (int(part or 0) for part in match.groups())
     return days * 86400 + hours * 3600 + minutes * 60 + seconds
+
+
+def youtube_video_id(url):
+    """Trả về mã của đúng một video, hoặc chuỗi rỗng nếu là link kênh, playlist hay trang khác."""
+    url = (url or "").strip()
+    try:
+        parsed = urllib.parse.urlsplit(url if "://" in url else f"https://{url}")
+        host = (parsed.hostname or "").lower()
+    except ValueError:
+        return ""
+    if parsed.scheme not in ("http", "https"):
+        return ""
+    parts = [part for part in parsed.path.split("/") if part]
+    candidate = ""
+    if host == "youtu.be":
+        candidate = parts[0] if parts else ""
+    elif host in _VIDEO_HOSTS:
+        if parts == ["watch"]:
+            candidate = urllib.parse.parse_qs(parsed.query).get("v", [""])[0]
+        elif len(parts) >= 2 and parts[0] in _VIDEO_PATHS:
+            candidate = parts[1]
+    # "videoseries" dài đúng 11 ký tự nhưng là trình phát playlist, không phải video.
+    return candidate if _VIDEO_ID.match(candidate) and candidate != "videoseries" else ""
+
+
+def video_url(video_id):
+    """Link chuẩn của video. Bỏ list= để ACRCloud không quét cả playlist."""
+    return f"https://www.youtube.com/watch?v={video_id}"
 
 
 def channel_filter(channel):
