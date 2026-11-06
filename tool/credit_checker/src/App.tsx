@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import {
   BookOpen,
+  Database,
   Check,
   CheckCircle2,
   Copy,
@@ -16,10 +17,10 @@ import {
   ShieldX,
   User,
 } from 'lucide-react';
-import { analyzeMusic, USE_CASE_LABELS } from './analyzer';
-import type { AnalysisResult, UseCase } from './analyzer';
-import { RESOURCE_GROUPS } from './catalog';
-import type { CopyrightStatus, MusicResource } from './catalog';
+import { analyzeMusic, buildCatalogIndex, USE_CASE_LABELS } from './analyzer';
+import type { AnalysisResult, CatalogIndex, UseCase } from './analyzer';
+import { CATALOG, RESOURCE_GROUPS } from './catalog';
+import type { CatalogFile, CopyrightStatus, MusicResource } from './catalog';
 
 type TabId = 'checker' | 'guide' | 'library';
 type CopyState = 'idle' | 'copied' | 'failed';
@@ -45,6 +46,10 @@ const PRESETS: MusicQuery[] = [
 const STATUS_STYLES: Record<CopyrightStatus, { badge: string; icon: ReactNode }> = {
   SAFE: {
     badge: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
+    icon: <ShieldCheck className="h-5 w-5" />,
+  },
+  LICENSED: {
+    badge: 'border-sky-500/40 bg-sky-500/10 text-sky-300',
     icon: <ShieldCheck className="h-5 w-5" />,
   },
   WARNING: {
@@ -83,6 +88,70 @@ const CHECKLIST_ITEMS = [
   'Đã ghi nguồn đúng mẫu nếu giấy phép yêu cầu',
   'Đã lưu giấy phép và hóa đơn vào hồ sơ dự án',
 ];
+
+interface CatalogState {
+  index: CatalogIndex;
+  importedCount: number;
+  generatedAt?: string;
+  isDemo: boolean;
+}
+
+const BUILT_IN_CATALOG: CatalogState = {
+  index: buildCatalogIndex(CATALOG),
+  importedCount: 0,
+  isDemo: false,
+};
+
+function isCatalogFile(value: unknown): value is CatalogFile {
+  return Array.isArray((value as CatalogFile | null)?.entries);
+}
+
+/** Nạp public/catalog.json nếu có. Không có thì dùng dữ liệu mẫu kèm theo app. */
+function useCatalog(): CatalogState {
+  const [catalog, setCatalog] = useState(BUILT_IN_CATALOG);
+
+  useEffect(() => {
+    let isCancelled = false;
+    fetch(`${import.meta.env.BASE_URL}catalog.json`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((file: unknown) => {
+        if (!isCancelled && isCatalogFile(file)) {
+          setCatalog({
+            index: buildCatalogIndex([...CATALOG, ...file.entries]),
+            importedCount: file.entries.length,
+            generatedAt: file.generatedAt,
+            isDemo: file.isDemo,
+          });
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  return catalog;
+}
+
+function CatalogNotice({ catalog }: { catalog: CatalogState }) {
+  if (catalog.isDemo) {
+    return (
+      <p className="mb-6 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-200">
+        <strong>Dữ liệu demo, không phải thông tin bản quyền thật.</strong> {catalog.importedCount.toLocaleString('vi-VN')} bài
+        được tạo tự động để thử khối lượng lớn. Ví dụ, thử nhập "Bài demo 00042" và "Nghệ sĩ demo 042".
+      </p>
+    );
+  }
+  const updatedAt = catalog.generatedAt && new Date(catalog.generatedAt).toLocaleDateString('vi-VN');
+  return (
+    <p className="mb-6 flex items-center gap-2 text-xs text-slate-400">
+      <Database className="h-3.5 w-3.5" />
+      {catalog.importedCount > 0
+        ? `Dữ liệu của đội: ${catalog.importedCount.toLocaleString('vi-VN')} bài, cập nhật ${updatedAt}.`
+        : 'Đang dùng dữ liệu mẫu rất nhỏ kèm theo app.'}
+    </p>
+  );
+}
 
 function ResourceLink({ resource }: { resource: MusicResource }) {
   return (
@@ -206,13 +275,16 @@ function ResultCard({ result }: { result: AnalysisResult }) {
   );
 }
 
-function CheckerTab() {
+function CheckerTab({ catalogIndex }: { catalogIndex: CatalogIndex }) {
   const [songTitle, setSongTitle] = useState('');
   const [artistName, setArtistName] = useState('');
   const [useCase, setUseCase] = useState<UseCase>('youtube_monetized');
   const [query, setQuery] = useState<MusicQuery | null>(null);
 
-  const result = useMemo(() => (query ? analyzeMusic({ ...query, useCase }) : null), [query, useCase]);
+  const result = useMemo(
+    () => (query ? analyzeMusic({ ...query, useCase }, catalogIndex) : null),
+    [query, useCase, catalogIndex],
+  );
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
@@ -371,6 +443,7 @@ function LibraryTab() {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>('checker');
+  const catalog = useCatalog();
 
   return (
     <div className="min-h-screen bg-slate-950 px-4 py-6 font-sans text-slate-100 md:px-6">
@@ -403,7 +476,8 @@ export default function App() {
       <main className="mx-auto mt-6 max-w-5xl">
         {/* Giữ các tab luôn được mount để đổi tab không làm mất form, kết quả và checklist. */}
         <div hidden={activeTab !== 'checker'}>
-          <CheckerTab />
+          <CatalogNotice catalog={catalog} />
+          <CheckerTab catalogIndex={catalog.index} />
         </div>
         <div hidden={activeTab !== 'guide'}>
           <GuideTab />

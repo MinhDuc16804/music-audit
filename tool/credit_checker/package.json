@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "catalog:import": "node scripts/importCatalog.ts",
+    "catalog:demo": "node scripts/generateDemoCatalog.ts && node scripts/importCatalog.ts data/catalog.demo.csv --demo"
   },
   "dependencies": {
     "lucide-react": "^0.460.0",
@@ -16,6 +18,7 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.4",
+    "@types/node": "^26.6.6",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^6.2.1",

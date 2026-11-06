@@ -3,7 +3,9 @@
  * Muốn thêm nhãn SAFE hoặc WARNING thì phải có nguồn xác minh và ghi vào sourceNote.
  */
 
-export type CopyrightStatus = 'SAFE' | 'WARNING' | 'RESTRICTED';
+import type { UseCase } from './analyzer';
+
+export type CopyrightStatus = 'SAFE' | 'LICENSED' | 'WARNING' | 'RESTRICTED';
 
 export interface MusicResource {
   name: string;
@@ -20,6 +22,17 @@ export interface CatalogEntry {
   masterRights: string;
   sourceNote: string;
   attribution?: string;
+  /** Bỏ trống nghĩa là không giới hạn mục đích sử dụng. */
+  allowedUses?: UseCase[];
+  /** Ngày hết hạn dạng YYYY-MM-DD. */
+  expiresOn?: string;
+}
+
+/** Nội dung file public/catalog.json do script nhập dữ liệu tạo ra. */
+export interface CatalogFile {
+  generatedAt: string;
+  isDemo: boolean;
+  entries: CatalogEntry[];
 }
 
 const PUBLIC_DOMAIN_LICENSE = 'Public Domain (chỉ phần bản phổ)';
