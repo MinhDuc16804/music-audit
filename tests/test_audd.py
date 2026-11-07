@@ -16,7 +16,25 @@ from music_audit.evaluate import BLOCK, HOLD, PASS_NO_MUSIC, gate_decision, iden
 
 ROOT = Path(__file__).resolve().parent.parent
 TOKEN = "audd-token-khong-duoc-in-ra"
-SONG = {"title": "Bài A", "artist": "Ca Sĩ", "label": "Hãng", "score": 100, "isrc": "VNA1"}
+SONG = {"title": "Bài A", "artist": "Ca Sĩ", "label": "Hãng", "album": "Album A", "score": 100, "isrc": "VNA1"}
+
+
+FAKE_YT_DLP = """
+import sys
+from pathlib import Path
+
+template = sys.argv[sys.argv.index("--output") + 1]
+path = Path(template.replace("%(ext)s", "mp3"))
+path.write_bytes(b"am thanh mp3")
+print(125)
+print(path)
+"""
+FAKE_YT_DLP_PRIVATE = """
+import sys
+
+sys.stderr.write("ERROR: [youtube] abc: Private video\\n")
+sys.exit(1)
+"""
 
 
 class FakeAudd(BaseHTTPRequestHandler):
@@ -45,6 +63,7 @@ class ParseAuddTests(unittest.TestCase):
         self.assertEqual(track["title"], "Bài A")
         self.assertEqual(track["artists"], "Ca Sĩ")
         self.assertEqual(track["label"], "Hãng")
+        self.assertEqual(track["album"], "Album A")
 
     def test_no_match_is_unknown_never_no_music(self):
         for raw in ({"result": []}, {"result": None}, {}, {"result": [{"songs": []}]}):
@@ -63,6 +82,55 @@ class ParseAuddTests(unittest.TestCase):
     def test_same_title_different_artist_stays_separate(self):
         other = {**SONG, "artist": "Ca Sĩ Khác"}
         self.assertEqual(len(parse_audd({"result": [{"songs": [SONG, other]}]}).tracks), 2)
+
+    def test_standard_endpoint_returns_one_song_as_object(self):
+        """Dạng này lấy theo phản hồi thật của AudD: result là một object, ISRC nằm trong apple_music."""
+        raw = {
+            "status": "success",
+            "result": {
+                "artist": "Alan Walker",
+                "title": "Faded (Instrumental)",
+                "label": "MER Recordings",
+                "timecode": "03:30",
+                "apple_music": {
+                    "isrc": "NOG841549020",
+                    "composerName": "Alan Walker, Jesper Borgén, Anders Froen & Gunnar Greve",
+                },
+                "spotify": {"external_ids": {"isrc": "NOG841549020"}},
+            },
+        }
+        scan = parse_audd(raw)
+        self.assertEqual(gate_decision(scan, {}), BLOCK)
+        track = identify_summary(scan)["tracks"][0]
+        self.assertEqual(track["title"], "Faded (Instrumental)")
+        self.assertEqual(track["isrc"], "NOG841549020")
+        self.assertIn("Jesper Borgén", track["composers"])
+
+    def test_isrc_can_come_from_spotify_or_be_missing(self):
+        spotify = {"title": "A", "artist": "B", "spotify": {"external_ids": {"isrc": "X1"}}}
+        self.assertEqual(parse_audd({"result": spotify}).tracks[0]["isrc"], "X1")
+        self.assertEqual(parse_audd({"result": {"title": "A", "artist": "B"}}).tracks[0]["isrc"], "")
+
+    def test_empty_object_result_is_unknown(self):
+        self.assertEqual(gate_decision(parse_audd({"result": {}}), {}), HOLD)
+
+    def test_segments_keep_candidates_of_each_chunk(self):
+        other = {"title": "Bài B", "artist": "Ca Sĩ Khác", "timecode": "03:00"}
+        scan = parse_audd({"result": [
+            {"offset": "00:00", "songs": [{**SONG, "timecode": "00:11"}]},
+            {"offset": "00:12", "songs": [{**SONG, "timecode": "00:23"}, other]},
+            {"offset": "00:24", "songs": []},
+        ]})
+        self.assertEqual([track["title"] for track in scan.tracks], ["Bài A", "Bài B"])
+        self.assertEqual(scan.segments, [
+            {"offset": "00:00", "tracks": [0], "timecodes": ["00:11"]},
+            {"offset": "00:12", "tracks": [0, 1], "timecodes": ["00:23", "03:00"]},
+        ])
+
+    def test_same_song_twice_in_a_chunk_counts_once(self):
+        scan = parse_audd({"result": [{"offset": "00:00", "songs": [SONG, SONG]}]})
+        self.assertEqual(scan.tracks[0]["played_duration"], 12)
+        self.assertEqual(scan.segments, [{"offset": "00:00", "tracks": [0], "timecodes": [""]}])
 
     def test_licensed_group_needs_title_and_artist(self):
         scan = parse_audd({"result": [{"songs": [SONG]}]})
@@ -88,10 +156,19 @@ class AuddCommandTests(unittest.TestCase):
         self.workdir = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.workdir, ignore_errors=True)
 
-    def _run(self, *args):
+    def _fake_yt_dlp(self, script):
+        """Tạo gói yt_dlp giả để chạy trọn lệnh mà không gọi YouTube."""
+        package = Path(self.workdir) / "fake" / "yt_dlp"
+        package.mkdir(parents=True)
+        (package / "__init__.py").write_text("", encoding="utf-8")
+        (package / "__main__.py").write_text(script, encoding="utf-8")
+        return {"PYTHONPATH": str(package.parent), "FFMPEG_LOCATION": "ffmpeg-gia.exe"}
+
+    def _run(self, *args, acr_token="", extra_env=None):
         env = {
             **os.environ,
-            "ACRCLOUD_ACCESS_TOKEN": "",
+            **(extra_env or {}),
+            "ACRCLOUD_ACCESS_TOKEN": acr_token,
             "AUDD_API_TOKEN": TOKEN,
             "AUDD_BASE_OVERRIDE": f"http://127.0.0.1:{self.server.server_port}",
             "AUDD_MAX_CHUNKS": "25",
@@ -113,6 +190,46 @@ class AuddCommandTests(unittest.TestCase):
         self.assertIn("5 phút", result["scan_note"])
         self.assertIn(b"limit=25", FakeAudd.bodies[0])
         self.assertNotIn(b"PL1", FakeAudd.bodies[0])
+
+    def test_audd_flag_wins_over_acrcloud_token(self):
+        done = self._run("identify", "https://youtu.be/song1234567", "--audd", acr_token="khoa-acr")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(json.loads(done.stdout)["provider"], "audd")
+
+    def test_output_has_segments_and_scan_limit(self):
+        result = json.loads(self._run("identify-file", self._media_file()).stdout)
+        self.assertEqual(result["segments"], [{"offset": "", "tracks": [0], "timecodes": [""]}])
+        self.assertEqual(result["max_seconds"], 300)
+        self.assertEqual(result["duration_seconds"], 0)
+
+    def test_extract_uploads_mp3_and_reports_duration(self):
+        env = self._fake_yt_dlp(FAKE_YT_DLP)
+        done = self._run("identify", "https://youtu.be/song1234567", "--extract", extra_env=env)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        result = json.loads(done.stdout)
+        self.assertEqual(result["duration_seconds"], 125)
+        self.assertEqual(result["url"], "https://www.youtube.com/watch?v=song1234567")
+        self.assertIn(b"am thanh mp3", FakeAudd.bodies[0])
+        self.assertIn(b"limit", FakeAudd.bodies[0])
+
+    def test_extract_is_not_repeated_for_same_video(self):
+        env = self._fake_yt_dlp(FAKE_YT_DLP)
+        self._run("identify", "https://youtu.be/song1234567", "--extract", extra_env=env)
+        again = json.loads(self._run("identify", "https://youtu.be/song1234567", "--extract", extra_env=env).stdout)
+        self.assertEqual(len(FakeAudd.bodies), 1)
+        self.assertEqual(again["duration_seconds"], 125)
+
+    def test_failed_extract_is_friendly_and_not_billed(self):
+        env = self._fake_yt_dlp(FAKE_YT_DLP_PRIVATE)
+        done = self._run("identify", "https://youtu.be/song1234567", "--extract", extra_env=env)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("riêng tư", done.stderr)
+        self.assertEqual(FakeAudd.bodies, [])
+
+    def _media_file(self):
+        path = Path(self.workdir) / "bai.mp3"
+        path.write_bytes(b"am thanh")
+        return str(path)
 
     def test_same_video_is_not_billed_twice(self):
         self._run("identify", "https://youtu.be/song1234567")

@@ -1,8 +1,9 @@
 /**
- * Thêm /api/identify vào server của Vite. Trình duyệt không được giữ token ACRCloud, nên server gọi
+ * Thêm /api/identify vào server của Vite. Trình duyệt không được giữ token AudD, nên server gọi
  * lệnh identify của music-audit, lệnh này tự đọc token trong .env.
  *
- * Cấu hình qua biến môi trường: MUSIC_AUDIT_PYTHON (đường dẫn Python), MUSIC_AUDIT_WORKDIR (nơi lưu out/).
+ * Cấu hình qua biến môi trường: MUSIC_AUDIT_PYTHON (đường dẫn Python), MUSIC_AUDIT_WORKDIR (nơi lưu out/),
+ * MAX_SCANS_PER_USER_PER_DAY (số lượt quét mỗi người mỗi ngày).
  */
 
 import { spawn } from 'node:child_process';
@@ -12,14 +13,14 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
 import { basename, extname, join, resolve } from 'node:path';
 import type { Plugin } from 'vite';
+import { MAX_UPLOAD_BYTES, UPLOAD_TOO_LARGE_MESSAGE } from '../src/uploadLimit.ts';
 import { getVideoUrl, parseYoutubeVideoId } from '../src/youtubeLink.ts';
+import { appendUsage, createDailyLimiter, getUserEmail, parseDailyLimit } from './usageLimit.ts';
+import type { UsageEntry } from './usageLimit.ts';
 
-const ROUTE = '/api/identify';
-const FILE_ROUTE = '/api/identify-file';
+export const ROUTE = '/api/identify';
+export const FILE_ROUTE = '/api/identify-file';
 const MAX_BODY_BYTES = 2048;
-const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
-const SCAN_WAIT_SECONDS = '20';
-const SCAN_POLL_SECONDS = '5';
 // AudD trả kết quả ngay trong yêu cầu, file dài có thể mất vài phút.
 const PROCESS_TIMEOUT_MS = 15 * 60_000;
 const MAX_MESSAGE_LENGTH = 300;
@@ -94,7 +95,7 @@ function saveUpload(request: IncomingMessage, targetPath: string): Promise<void>
       if (size > MAX_UPLOAD_BYTES) {
         target.destroy();
         request.destroy();
-        reject(new Error('File lớn hơn 500 MB.'));
+        reject(new Error(UPLOAD_TOO_LARGE_MESSAGE));
       }
     });
     request.on('error', reject);
@@ -144,7 +145,7 @@ function parseRequestedVideoId(body: string): string {
   }
 }
 
-function createHandlers(getAuditRoot: () => string) {
+export function createHandlers(getAuditRoot: () => string) {
   // Lệnh identify đọc rồi ghi lại out/submissions.json, chạy song song có thể làm mất dữ liệu và quét trùng.
   let queue: Promise<unknown> = Promise.resolve();
 
@@ -152,6 +153,23 @@ function createHandlers(getAuditRoot: () => string) {
     const job = queue.then(() => runAudit(getAuditRoot(), typeof commandArgs === 'function' ? commandArgs() : commandArgs));
     queue = job.catch(() => undefined);
     return job;
+  };
+
+  const allowScan = createDailyLimiter(parseDailyLimit(process.env.MAX_SCANS_PER_USER_PER_DAY));
+
+  const logUsage = (user: string, kind: UsageEntry['kind'], target: string, outcome: UsageEntry['outcome']) => {
+    const workdir = process.env.MUSIC_AUDIT_WORKDIR ?? getAuditRoot();
+    return appendUsage(join(workdir, 'out', 'usage.jsonl'), { time: new Date().toISOString(), user, kind, target, outcome });
+  };
+
+  /** Hết lượt thì báo lỗi và trả về false. */
+  const checkLimit = async (response: ServerResponse, user: string, kind: UsageEntry['kind'], target: string) => {
+    if (allowScan(user)) {
+      return true;
+    }
+    await logUsage(user, kind, target, 'limited');
+    sendJson(response, 429, { error: 'Đã hết lượt quét hôm nay. Hãy thử lại vào ngày mai hoặc liên hệ người quản trị.' });
+    return false;
   };
 
   const handleLink = async (request: IncomingMessage, response: ServerResponse) => {
@@ -164,22 +182,24 @@ function createHandlers(getAuditRoot: () => string) {
       return;
     }
 
+    const user = getUserEmail(request.headers);
+    let target = '';
     try {
       const videoId = parseRequestedVideoId(await readBody(request));
       if (!videoId) {
         sendJson(response, 400, { error: 'Chỉ nhận link của một video YouTube, không nhận link kênh hay playlist.' });
         return;
       }
-      const result = await enqueue([
-        'identify',
-        getVideoUrl(videoId),
-        '--timeout',
-        SCAN_WAIT_SECONDS,
-        '--interval',
-        SCAN_POLL_SECONDS,
-      ]);
+      target = getVideoUrl(videoId);
+      if (!(await checkLimit(response, user, 'link', target))) {
+        return;
+      }
+      // Server tự tách mp3 rồi gửi file cho AudD, nên không cần AudD đọc được link YouTube.
+      const result = await enqueue(['identify', target, '--extract']);
+      await logUsage(user, 'link', target, 'done');
       sendJson(response, 200, result);
     } catch (error) {
+      await logUsage(user, 'link', target, 'error');
       sendJson(response, 502, { error: error instanceof Error ? error.message : 'Lỗi không xác định' });
     }
   };
@@ -200,12 +220,21 @@ function createHandlers(getAuditRoot: () => string) {
       return;
     }
 
+    const user = getUserEmail(request.headers);
+    if (!(await checkLimit(response, user, 'file', fileName))) {
+      request.resume();
+      return;
+    }
+
     const folder = await mkdtemp(join(tmpdir(), 'credit-checker-'));
     try {
       const uploadPath = join(folder, `upload${extname(fileName).toLowerCase()}`);
       await saveUpload(request, uploadPath);
-      sendJson(response, 200, await enqueue(['identify-file', uploadPath, `--name=${fileName}`]));
+      const result = await enqueue(['identify-file', uploadPath, `--name=${fileName}`]);
+      await logUsage(user, 'file', fileName, 'done');
+      sendJson(response, 200, result);
     } catch (error) {
+      await logUsage(user, 'file', fileName, 'error');
       sendJson(response, 502, { error: error instanceof Error ? error.message : 'Lỗi không xác định' });
     } finally {
       await rm(folder, { recursive: true, force: true });

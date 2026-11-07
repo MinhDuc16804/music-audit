@@ -1,0 +1,17 @@
+# Khóa và dữ liệu nhạy cảm không được vào image
+.env
+data/
+out/
+tool/credit_checker/data/
+tool/credit_checker/public/catalog.json
+
+.git/
+.claude/
+tests/
+templates/
+**/node_modules/
+**/dist/
+**/__pycache__/
+**/*.pyc
+**/*.test.ts
+**/*.md

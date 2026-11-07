@@ -15,6 +15,7 @@ from pathlib import Path
 
 from music_audit.acrcloud import AcrClient, AcrError
 from music_audit.audd import CHUNK_SECONDS, AuddClient, AuddError, parse_audd
+from music_audit.extract import ExtractError, extract_audio
 from music_audit.common import (
     TESTSET_COLUMNS,
     load_env,
@@ -237,7 +238,18 @@ def _wait_for_scan(client, container, file_id, paths, timeout, interval):
         time.sleep(interval)
 
 
-def _print_audd_result(source, source_id, raw, limit):
+def youtube_duration(video_id):
+    """Độ dài video, 0 nếu chưa có khóa hoặc không lấy được. Thiếu độ dài thì không kết luận được độ phủ."""
+    api_key = os.environ.get("YOUTUBE_API_KEY", "")
+    if not api_key:
+        return 0
+    try:
+        return YoutubeClient(api_key).video_duration(video_id)
+    except YoutubeError:
+        return 0
+
+
+def _print_audd_result(source, source_id, raw, limit, duration=0):
     minutes = limit * CHUNK_SECONDS // 60
     output = {
         "url": source,
@@ -246,6 +258,8 @@ def _print_audd_result(source, source_id, raw, limit):
         "provider": "audd",
         "scan_note": f"AudD chỉ quét tối đa {minutes} phút đầu của mỗi video.",
         **identify_summary(parse_audd(raw)),
+        "duration_seconds": duration,
+        "max_seconds": limit * CHUNK_SECONDS,
     }
     print(json.dumps(output, ensure_ascii=False, indent=2))
 
@@ -257,7 +271,22 @@ def _identify_with_audd(args, paths, video_id, url):
     if raw is None:
         raw = audd_client().recognize_url(url, limit)
         write_json(cache, raw)
-    _print_audd_result(url, video_id, raw, limit)
+    _print_audd_result(url, video_id, raw, limit, youtube_duration(video_id))
+
+
+def _identify_with_extraction(args, paths, video_id, url):
+    """Tự tách mp3 rồi gửi file cho AudD. Kết quả được lưu nên video đã quét không bị tải và tính phí lại."""
+    cache = paths.audd / f"{video_id}.json"
+    limit = audd_max_chunks()
+    raw = None if args.rescan else read_json(cache, None)
+    if raw is None:
+        client = audd_client()
+        with tempfile.TemporaryDirectory() as folder:
+            audio = extract_audio(url, folder, limit * CHUNK_SECONDS)
+            raw = client.recognize_file(audio.path, limit)
+        raw["duration_seconds"] = audio.duration
+        write_json(cache, raw)
+    _print_audd_result(url, video_id, raw, limit, raw.get("duration_seconds") or youtube_duration(video_id))
 
 
 def _file_digest(path):
@@ -287,7 +316,10 @@ def cmd_identify(args, paths):
     if not video_id:
         sys.exit("Chỉ nhận link của một video YouTube, không nhận link kênh hay playlist.")
     url = video_url(video_id)
-    if uses_audd():
+    if args.extract:
+        _identify_with_extraction(args, paths, video_id, url)
+        return
+    if args.audd or uses_audd():
         _identify_with_audd(args, paths, video_id, url)
         return
     client = acr_client()
@@ -366,6 +398,8 @@ def build_parser():
     command.add_argument("--timeout", type=float, default=100, help="Số giây chờ kết quả trước khi trả về processing")
     command.add_argument("--interval", type=float, default=10)
     command.add_argument("--rescan", action="store_true", help="Gửi quét lại dù video đã quét, tốn thêm lượt quét")
+    command.add_argument("--audd", action="store_true", help="Luôn dùng AudD, kể cả khi có khóa ACRCloud")
+    command.add_argument("--extract", action="store_true", help="Tự tách mp3 từ video rồi gửi file cho AudD, cần yt-dlp và ffmpeg")
     command.set_defaults(handler=cmd_identify)
 
     command = commands.add_parser("identify-file", help="Nhận diện nhạc trong một file bằng AudD, in kết quả dạng JSON")
@@ -385,7 +419,7 @@ def main():
     paths = Paths(args.workdir)
     try:
         args.handler(args, paths)
-    except (AcrError, AuddError, YoutubeError) as error:
+    except (AcrError, AuddError, ExtractError, YoutubeError) as error:
         sys.exit(str(error))
 
 

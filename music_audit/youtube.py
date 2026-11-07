@@ -82,6 +82,11 @@ class YoutubeClient:
         except urllib.error.URLError as error:
             raise YoutubeError(f"Không kết nối được YouTube API: {error.reason}") from None
 
+    def video_duration(self, video_id):
+        """Trả về độ dài của một video tính bằng giây, 0 nếu không tìm thấy."""
+        items = self._get("videos", {"part": "contentDetails", "id": video_id}).get("items") or []
+        return parse_duration(items[0]["contentDetails"].get("duration")) if items else 0
+
     def list_channel_videos(self, channel):
         """Trả về danh sách video của kênh kèm độ dài và lượt xem."""
         found = self._get("channels", {"part": "snippet,contentDetails", **channel_filter(channel)})

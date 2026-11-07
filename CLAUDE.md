@@ -10,7 +10,7 @@ python3 -m unittest discover -s tests   # kiểm thử, dùng máy chủ ACRClou
 python3 audit.py --help                 # các lệnh con: list-videos, sample, create-container, use-container, submit, fetch, report, identify, identify-file
 ```
 
-Python 3.11 trở lên, chỉ dùng thư viện chuẩn. Cần `ffmpeg` nếu quét file video trên máy.
+Python 3.11 trở lên, code chỉ dùng thư viện chuẩn. Cần `ffmpeg` nếu quét file video trên máy, cần thêm `yt-dlp` cho `identify --extract`.
 
 ## Kiến trúc
 
@@ -18,7 +18,9 @@ Python 3.11 trở lên, chỉ dùng thư viện chuẩn. Cần `ffmpeg` nếu qu
 - `.claude/skills/identify-music/`: skill để agent gọi lệnh `identify` khi có người dán link YouTube.
 - `music_audit/acrcloud.py`: gọi API ACRCloud. `music_audit/youtube.py`: lấy danh sách video từ YouTube Data API.
 - `music_audit/audd.py`: gọi API AudD cho `identify` và `identify-file`. AudD không phát hiện "không có nhạc", nên không khớp là `hold`.
-- `tool/credit_checker/`: web app tra cứu bản quyền, gọi lệnh `identify` qua server của Vite.
+- `tool/credit_checker/`: web app nhận link hoặc file, nhận diện bằng AudD qua server của Vite rồi đối chiếu với YouTube Audio Library.
+- `music_audit/extract.py`: tách mp3 từ một video YouTube cho `identify --extract`, gọi `yt-dlp` như công cụ ngoài.
+- `Dockerfile`, `compose.yml`: đóng gói web app. `tool/credit_checker/server/productionServer.ts` là server chạy thật.
 - `music_audit/evaluate.py`: phân loại kết quả, tính tỷ lệ kèm khoảng tin cậy, viết báo cáo.
 - `music_audit/common.py`: đọc `.env`, đọc và kiểm tra danh sách video.
 

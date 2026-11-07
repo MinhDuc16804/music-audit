@@ -85,11 +85,33 @@ def _split_artists(artist):
     return list(dict.fromkeys([artist, *(part.strip() for part in parts if part.strip())]))
 
 
+def _iter_chunks(raw):
+    """Duyệt từng đoạn quét. Cổng enterprise trả danh sách đoạn, cổng thường trả đúng một bài."""
+    result = raw.get("result")
+    if isinstance(result, dict):
+        yield "", result.get("songs") or [result]
+    elif isinstance(result, list):
+        for chunk in result:
+            yield chunk.get("offset") or "", chunk.get("songs") or []
+
+
+def _get_isrc(song):
+    apple_music = song.get("apple_music") or {}
+    spotify_ids = (song.get("spotify") or {}).get("external_ids") or {}
+    return song.get("isrc") or apple_music.get("isrc") or spotify_ids.get("isrc") or ""
+
+
 def parse_audd(raw):
-    """Đổi kết quả AudD thành Scan. Gộp các đoạn của cùng một bài, tính theo tên bài và nghệ sĩ."""
+    """Đổi kết quả AudD thành Scan. Gộp các đoạn của cùng một bài, tính theo tên bài và nghệ sĩ.
+
+    Mỗi đoạn có thể có nhiều bài ứng viên, không phải nhiều bài phát cùng lúc, nên segments giữ lại từng đoạn
+    cùng vị trí khớp trong bài. Bài phát thật có vị trí tiến đều theo video, bài nhận nhầm thì không.
+    """
     best = {}
-    for chunk in raw.get("result") or []:
-        for song in chunk.get("songs") or []:
+    chunks = []
+    for offset, songs in _iter_chunks(raw):
+        keys = {}
+        for song in songs:
             title = song.get("title") or ""
             artist = song.get("artist") or ""
             if not title and not artist:
@@ -103,14 +125,26 @@ def parse_audd(raw):
                     "artists": artist,
                     "artist_names": _split_artists(artist),
                     "label": song.get("label") or "",
+                    "album": song.get("album") or "",
                     "score": score,
                     "played_duration": CHUNK_SECONDS,
                     "kind": "music",
-                    "isrc": song.get("isrc") or "",
+                    "isrc": _get_isrc(song),
+                    "composers": (song.get("apple_music") or {}).get("composerName") or "",
                 }
             else:
                 current["score"] = max(current["score"], score)
-                current["played_duration"] += CHUNK_SECONDS
+                if key not in keys:
+                    current["played_duration"] += CHUNK_SECONDS
+            keys.setdefault(key, song.get("timecode") or "")
+        if keys:
+            chunks.append((offset, keys))
 
-    tracks = sorted(best.values(), key=lambda track: -track["played_duration"])
-    return Scan(state=1, tracks=tracks, music="yes" if tracks else "unknown")
+    ordered = sorted(best, key=lambda key: -best[key]["played_duration"])
+    positions = {key: position for position, key in enumerate(ordered)}
+    tracks = [best[key] for key in ordered]
+    segments = [
+        {"offset": offset, "tracks": [positions[key] for key in keys], "timecodes": list(keys.values())}
+        for offset, keys in chunks
+    ]
+    return Scan(state=1, tracks=tracks, music="yes" if tracks else "unknown", segments=segments)

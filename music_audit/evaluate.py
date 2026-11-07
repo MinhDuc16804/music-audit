@@ -44,6 +44,7 @@ class Scan:
     tracks: list = field(default_factory=list)
     music: str = "unknown"  # yes, no, unknown
     speech_share: float | None = None
+    segments: list = field(default_factory=list)  # từng đoạn quét và vị trí các bài ứng viên trong tracks
 
 
 def normalize_title(value):
@@ -154,6 +155,7 @@ def identify_summary(scan):
         "music": scan.music,
         "duration_seconds": scan.duration,
         "tracks": tracks,
+        "segments": scan.segments,
     }
 
 
