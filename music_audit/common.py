@@ -10,6 +10,7 @@ TESTSET_COLUMNS = (
     "source",
     "group",
     "music_origin",
+    "has_music",
     "has_speech",
     "expected_title",
     "expected_artist",

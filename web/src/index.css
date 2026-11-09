@@ -1,0 +1,65 @@
+@import 'tailwindcss';
+
+/* Màu đo từ logo Quốc Duy: chuyển từ brand-400 sang brand-600. Chữ trắng đặt trên brand-700 trở xuống. */
+@theme {
+  --font-sans: 'Be Vietnam Pro', ui-sans-serif, system-ui, sans-serif;
+
+  --color-brand-50: #eaf4ff;
+  --color-brand-100: #d6e9ff;
+  --color-brand-200: #b3d6ff;
+  --color-brand-300: #7dbcff;
+  --color-brand-400: #3aadfc;
+  --color-brand-600: #1f70fd;
+  --color-brand-700: #1a66e8;
+  --color-brand-800: #1557cc;
+  --color-brand-900: #0f3f96;
+  --color-brand-950: #0a2a66;
+
+  --shadow-card: 0 1px 2px rgb(21 87 204 / 0.06), 0 10px 28px rgb(21 87 204 / 0.09);
+}
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  background-color: #f1f7ff;
+  background-image:
+    radial-gradient(48rem 28rem at 100% 0%, rgb(58 173 252 / 0.16), transparent 70%),
+    radial-gradient(40rem 26rem at 20% 100%, rgb(31 112 253 / 0.09), transparent 70%);
+  background-attachment: fixed;
+}
+
+/* Thanh sóng âm, chỉ để trang trí. Đặt trong layer để class hidden của Tailwind ẩn được. */
+@layer components {
+  .sound-bars {
+    display: flex;
+    align-items: flex-end;
+    gap: 5px;
+  }
+
+  .sound-bars span {
+    flex: 1;
+    border-radius: 999px;
+    background-color: currentColor;
+    transform-origin: bottom;
+    animation: sound-bar 1.9s ease-in-out infinite alternate;
+  }
+}
+
+@keyframes sound-bar {
+  from {
+    transform: scaleY(0.55);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @layer components {
+    .sound-bars span {
+      animation: none;
+    }
+  }
+}

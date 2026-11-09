@@ -1,0 +1,5 @@
+node_modules/
+dist/
+
+# Dữ liệu cục bộ, không đưa vào git
+data/

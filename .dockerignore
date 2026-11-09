@@ -1,0 +1,16 @@
+# Khóa và dữ liệu nhạy cảm không được vào image
+.env
+data/
+out/
+web/data/
+
+.git/
+.claude/
+tests/
+templates/
+**/node_modules/
+**/dist/
+**/__pycache__/
+**/*.pyc
+**/*.test.ts
+**/*.md

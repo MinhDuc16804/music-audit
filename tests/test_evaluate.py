@@ -21,7 +21,7 @@ from music_audit.evaluate import (
     titles_match,
     wilson_interval,
 )
-from music_audit.youtube import channel_filter, parse_duration
+from music_audit.youtube import YoutubeClient, channel_filter, parse_duration
 
 
 def raw(state=1, music=None, segments=None, detected=None, duration=100):
@@ -289,6 +289,20 @@ class YoutubeHelpersTests(unittest.TestCase):
         self.assertEqual(channel_filter("https://www.youtube.com/@kenh/"), {"forHandle": "@kenh"})
         self.assertEqual(channel_filter("UC" + "a" * 22), {"id": "UC" + "a" * 22})
 
+
+
+class VideoDurationTests(unittest.TestCase):
+    def _client(self, reply):
+        client = YoutubeClient("khoa")
+        client._get = lambda _path, _params: reply
+        return client
+
+    def test_reads_duration_of_one_video(self):
+        reply = {"items": [{"contentDetails": {"duration": "PT1M40S"}}]}
+        self.assertEqual(self._client(reply).video_duration("abc"), 100)
+
+    def test_unknown_video_has_no_duration(self):
+        self.assertEqual(self._client({"items": []}).video_duration("abc"), 0)
 
 if __name__ == "__main__":
     unittest.main()
