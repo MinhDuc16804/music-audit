@@ -18,7 +18,7 @@ import { getContentType, resolveStaticPath } from './staticFiles.ts';
 
 const APP_ROOT = resolve(import.meta.dirname, '..');
 const DIST_ROOT = join(APP_ROOT, 'dist');
-const AUDIT_ROOT = process.env.MUSIC_AUDIT_ROOT ?? resolve(APP_ROOT, '..', '..');
+const AUDIT_ROOT = process.env.MUSIC_AUDIT_ROOT ?? resolve(APP_ROOT, '..');
 const HOST = process.env.HOST ?? '127.0.0.1';
 const PORT = Number(process.env.PORT ?? 8080);
 const HEALTH_ROUTE = '/api/health';

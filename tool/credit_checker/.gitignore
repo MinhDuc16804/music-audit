@@ -1,6 +1,0 @@
-node_modules/
-dist/
-
-# Dữ liệu bài hát và giấy phép của đội, không đưa vào git
-data/
-public/catalog.json

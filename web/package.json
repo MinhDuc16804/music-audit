@@ -11,11 +11,7 @@
     "test": "vitest run",
     "library:import": "node scripts/importAudioLibrary.ts",
     "library:studio": "node scripts/importStudioLibrary.ts",
-    "library:additions": "node scripts/importLibraryAdditions.ts",
-    "catalog:import": "node scripts/importCatalog.ts",
-    "catalog:acr": "node scripts/convertAcrResults.ts",
-    "demo:acr": "node scripts/generateDemoCatalog.ts --if-missing && node scripts/convertAcrResults.ts templates/acr-sample && node scripts/importCatalog.ts data/catalog.demo.csv data/catalog.acrcloud.csv --demo",
-    "catalog:demo": "node scripts/generateDemoCatalog.ts && node scripts/importCatalog.ts data/catalog.demo.csv --demo"
+    "library:additions": "node scripts/importLibraryAdditions.ts"
   },
   "dependencies": {
     "lucide-react": "^0.460.0",

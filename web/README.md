@@ -1,4 +1,4 @@
-# credit_checker
+# Web app kiểm tra nhạc
 
 Web app kiểm tra nhạc trong file hoặc video YouTube. Quy trình có ba bước:
 
@@ -185,67 +185,6 @@ npm run library:additions
 - `library:studio` và `library:import` luôn áp lại file này. Bài thêm tay sau này có trong lần xuất Studio thì được tính là bài Studio.
 - Có dòng sai thì lệnh báo số dòng và không ghi gì.
 
-## Dữ liệu giấy phép cũ
-
-App không còn dùng các lệnh và dữ liệu trong phần này. Chúng được giữ lại phòng khi cần quay về đối chiếu với giấy phép của đội.
-
-
-Trong PowerShell, thay `npm` bằng `npm.cmd` nếu máy chặn script.
-
-1. Chép `templates/catalog.csv` thành `data/catalog.csv` rồi điền dữ liệu. Trong Excel, lưu dạng **CSV UTF-8**.
-2. Chạy lệnh nhập. Nếu có dòng lỗi, lệnh sẽ liệt kê số dòng và không nhập gì:
-
-```bash
-npm run catalog:import -- data/catalog.csv
-```
-
-| Cột | Nội dung |
-|---|---|
-| `title`, `artist` | Bắt buộc. Tên khác của cùng bài hoặc nghệ sĩ thì ngăn bằng `\|` |
-| `status` | `LICENSED` (đội đã có giấy phép), `SAFE` (Public Domain), `WARNING` (dùng có điều kiện), `RESTRICTED` |
-| `license_type` | Bắt buộc. Loại giấy phép hoặc số hợp đồng |
-| `allowed_use` | `all`, hoặc `youtube`, `ads`, `film`, `podcast` ngăn bằng `\|`. Bắt buộc với `LICENSED` |
-| `expires_on` | Ngày hết hạn dạng `YYYY-MM-DD`. Sau ngày này app coi là rủi ro cao |
-| `source`, `verified_by` | Bắt buộc. Nguồn xác minh và người kiểm tra |
-| `attribution` | Đoạn ghi nguồn. Dùng `\n` để xuống dòng |
-
-`data/` và `public/catalog.json` không vào git vì có thể chứa thông tin hợp đồng. App web không có đăng nhập: ai mở được app
-thì đọc được toàn bộ `catalog.json`, nên đừng đưa dữ liệu hợp đồng lên trang công khai.
-
-### Nhập kết quả ACRCloud
-
-Lệnh dưới đây đọc kết quả do `music-audit` lưu ở `out/raw` (có thể truyền thư mục khác) và tạo `data/catalog.acrcloud.csv`:
-
-```bash
-npm run catalog:acr
-```
-
-Rồi nhập chung với file hợp đồng. **Đặt file hợp đồng lên trước**, vì khi trùng bài thì file đứng trước được ưu tiên:
-
-```bash
-npm run catalog:import -- data/catalog.csv data/catalog.acrcloud.csv
-```
-
-Mọi bài ACRCloud nhận ra đều được ghi là `RESTRICTED`, kể cả chính sách `Allow`, vì ACRCloud cho biết ai giữ quyền chứ không cho biết
-công ty có được dùng hay không. Video không nhận ra bài nào thì không được ghi vào dữ liệu và không được coi là an toàn. Định dạng
-được viết theo tài liệu API, chưa đối chiếu với tài khoản thật.
-
-Muốn xem thử khi chưa có tài khoản ACRCloud, lệnh sau dùng kết quả giả trong `templates/acr-sample` rồi nhập chung với 5.000 bài demo.
-Sau đó nhập "Bài Mẫu Thương Mại" và "Ca Sĩ Mẫu" trong app:
-
-```bash
-npm run demo:acr
-```
-
-### Dữ liệu demo
-
-Muốn thử khối lượng lớn, lệnh sau tạo 5.000 bài giả và app sẽ hiện cảnh báo dữ liệu demo. Khi có dữ liệu thật, chỉ cần chạy lại
-lệnh nhập ở trên là dữ liệu demo được thay thế.
-
-```bash
-npm run catalog:demo
-```
-
 ## Cấu trúc
 
 | File | Vai trò |
@@ -254,9 +193,6 @@ npm run catalog:demo
 | `src/audioLibrary.ts` | Đọc và tra cứu danh sách YouTube Audio Library |
 | `src/videoCheck.ts` | Kết luận từ kết quả AudD và danh sách thư viện |
 | `public/audio-library.json` | Danh sách bài do `library:import` và `library:studio` tạo |
-| `src/catalog.ts` | Danh sách nguồn nhạc, dữ liệu mẫu cũ |
-| `src/analyzer.ts` | Luật phân loại cũ, app không còn dùng |
-| `src/catalogImport.ts` | Đọc, kiểm tra và gộp CSV |
-| `src/acrConvert.ts` | Chuyển kết quả ACRCloud thành CSV |
-| `scripts/` | Lệnh nhập dữ liệu và tạo dữ liệu demo |
-| `templates/catalog.csv` | File mẫu |
+| `src/catalog.ts` | Danh sách nguồn nhạc |
+| `src/csv.ts` | Đọc file CSV |
+| `scripts/` | Lệnh cập nhật danh sách YouTube Audio Library |

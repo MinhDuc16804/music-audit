@@ -14,8 +14,3 @@ export function normalizeText(value: string): string {
 export function normalizeTitle(value: string): string {
   return normalizeText(value.replace(/\(.*?\)|\[.*?\]/g, ' '));
 }
-
-/** Khóa tra cứu của một cặp tên bài và tác giả. */
-export function getCatalogKey(title: string, artist: string): string {
-  return `${normalizeTitle(title)}\u0000${normalizeText(artist)}`;
-}

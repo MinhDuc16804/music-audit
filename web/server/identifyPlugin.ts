@@ -479,7 +479,7 @@ export function identifyPlugin(): Plugin {
   return {
     name: 'music-audit-identify',
     configResolved(config) {
-      auditRoot = resolve(config.root, '..', '..');
+      auditRoot = resolve(config.root, '..');
     },
     configureServer(server) {
       server.middlewares.use(FILE_ROUTE, handleFile);

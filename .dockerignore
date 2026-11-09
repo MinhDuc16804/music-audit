@@ -2,8 +2,7 @@
 .env
 data/
 out/
-tool/credit_checker/data/
-tool/credit_checker/public/catalog.json
+web/data/
 
 .git/
 .claude/

@@ -23,10 +23,10 @@ Nạp chúng trong `music_audit/detect.py` khi chạy thật, không import ở 
 - `.claude/skills/identify-music/`: skill để agent gọi lệnh `identify` khi có người dán link YouTube.
 - `music_audit/acrcloud.py`: gọi API ACRCloud. `music_audit/youtube.py`: lấy danh sách video từ YouTube Data API.
 - `music_audit/audd.py`: gọi API AudD cho `identify` và `identify-file`. AudD không phát hiện "không có nhạc", nên không khớp là `hold`.
-- `tool/credit_checker/`: web app nhận link hoặc file, nhận diện bằng AudD qua server của Vite rồi đối chiếu với YouTube Audio Library.
+- `web/`: web app nhận link hoặc file, nhận diện bằng AudD qua server của Vite rồi đối chiếu với YouTube Audio Library.
 - `music_audit/extract.py`: tách mp3 từ một video YouTube cho `identify --extract`, gọi `yt-dlp` như công cụ ngoài.
-- `tool/credit_checker/server/channelRunner.ts`: tab Quét cả kênh, gọi `download-audio`, `detect-music`, rồi `submit --video-id` từng video sau khi có người xác nhận chi phí. Không được bỏ bước xác nhận hay tự chạy tiếp sau khi khởi động lại.
-- `Dockerfile`, `compose.yml`: đóng gói web app. `tool/credit_checker/server/productionServer.ts` là server chạy thật.
+- `web/server/channelRunner.ts`: tab Quét cả kênh, gọi `download-audio`, `detect-music`, rồi `submit --video-id` từng video sau khi có người xác nhận chi phí. Không được bỏ bước xác nhận hay tự chạy tiếp sau khi khởi động lại.
+- `Dockerfile`, `compose.yml`: đóng gói web app. `web/server/productionServer.ts` là server chạy thật.
 - `music_audit/detect.py`: máy lọc có nhạc hay không (YAMNet) và chọn đoạn cắt cho `--clips`.
 - `music_audit/grouping.py`: lệnh `export`, gom theo bài (`songs.csv`) và báo cáo mỗi video một dòng (`bao-cao-quet.csv`). Thông tin Studio (Library, Policy) không bao giờ đưa video vào `sach`.
 - `music_audit/evaluate.py`: phân loại kết quả, tính tỷ lệ kèm khoảng tin cậy, viết báo cáo.

@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseLibraryAdditions } from '../src/audioLibrary.ts';
 import type { AudioLibraryTrack } from '../src/audioLibrary.ts';
-import { parseCsv } from '../src/catalogImport.ts';
+import { parseCsv } from '../src/csv.ts';
 
 const ADDITIONS_PATH = join(import.meta.dirname, '..', 'library-additions.csv');
 

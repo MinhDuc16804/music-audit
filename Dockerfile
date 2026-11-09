@@ -1,10 +1,10 @@
-# Đóng gói web app credit_checker cùng music-audit, yt-dlp và ffmpeg. Khóa không nằm trong image, xem compose.yml.
+# Đóng gói web app cùng music-audit, yt-dlp và ffmpeg. Khóa không nằm trong image, xem compose.yml.
 
 FROM node:24-slim AS build
-WORKDIR /app/tool/credit_checker
-COPY tool/credit_checker/package.json tool/credit_checker/package-lock.json ./
+WORKDIR /app/web
+COPY web/package.json web/package-lock.json ./
 RUN npm ci
-COPY tool/credit_checker/ ./
+COPY web/ ./
 RUN npm run build
 
 FROM node:24-slim
@@ -24,10 +24,10 @@ RUN mkdir models && /opt/venv/bin/python -c "import urllib.request as u; u.urlre
 COPY audit.py ./
 COPY music_audit ./music_audit
 COPY resources ./resources
-COPY tool/credit_checker/package.json ./tool/credit_checker/
-COPY tool/credit_checker/server ./tool/credit_checker/server
-COPY tool/credit_checker/src/youtubeLink.ts tool/credit_checker/src/uploadLimit.ts tool/credit_checker/src/batchScan.ts tool/credit_checker/src/channelScan.ts ./tool/credit_checker/src/
-COPY --from=build /app/tool/credit_checker/dist ./tool/credit_checker/dist
+COPY web/package.json ./web/
+COPY web/server ./web/server
+COPY web/src/youtubeLink.ts web/src/uploadLimit.ts web/src/batchScan.ts web/src/channelScan.ts ./web/src/
+COPY --from=build /app/web/dist ./web/dist
 RUN mkdir /data && chown node:node /data
 
 ENV HOST=0.0.0.0 \
@@ -43,6 +43,6 @@ ENV HOST=0.0.0.0 \
     AUDD_DATA_DIR=/data/audd/data
 
 USER node
-WORKDIR /app/tool/credit_checker
+WORKDIR /app/web
 EXPOSE 8080
 CMD ["node", "server/productionServer.ts"]
