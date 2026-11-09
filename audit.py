@@ -890,6 +890,7 @@ def cmd_channel_status(args, paths):
         seconds = int(float(video.get("duration_seconds") or 0))
         videos.append({
             "videoId": video["video_id"],
+            "title": video.get("title", ""),
             "seconds": seconds,
             "group": (detections.get(source) or {}).get("group", ""),
             "hasAudio": local_audio(paths, source) is not None,

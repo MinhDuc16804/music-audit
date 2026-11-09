@@ -24,6 +24,7 @@ export interface ChannelOptions {
 
 export interface ChannelVideo {
   videoId: string;
+  title: string;
   seconds: number;
   group: string;
   hasAudio: boolean;
@@ -200,6 +201,16 @@ export function worstCaseRequests(videos: ChannelVideo[], options: ChannelOption
       const scanned = Math.min(video.seconds, maxSeconds);
       return sum + (options.clips > 0 ? Math.min(options.clips, Math.ceil(scanned / CLIP_EVERY_SECONDS)) : video.requests);
     }, 0);
+}
+
+/** Bỏ dấu và viết thường để tìm tên tiếng Việt không cần gõ dấu. */
+function foldText(value: string): string {
+  return value.toLowerCase().replace(/đ/g, 'd').normalize('NFD').replace(/\p{M}/gu, '');
+}
+
+export function searchChannelVideos(videos: ChannelVideo[], query: string): ChannelVideo[] {
+  const needle = foldText(query.trim());
+  return needle ? videos.filter((video) => foldText(video.title).includes(needle)) : videos;
 }
 
 export function buildChannelGate(videos: ChannelVideo[], options: ChannelOptions): ChannelGate {
