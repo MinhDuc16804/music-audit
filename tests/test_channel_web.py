@@ -127,6 +127,7 @@ class ChannelStatusTests(ChannelCommandTestCase):
         self.assertEqual(status["channel"], "Kênh")
         self.assertEqual(status["maxSeconds"], 3600)
         first, second = status["videos"][:2]
+        self.assertEqual(first["title"], f"Video {A}")
         self.assertEqual((first["videoId"], first["group"], first["hasAudio"], first["scanned"], first["requests"]), (A, "co-nhac", True, False, 5))
         self.assertEqual((second["hasAudio"], second["scanned"]), (False, True))
 

@@ -7,6 +7,7 @@ import {
   parseChannelOptions,
   parseProgress,
   pickToSend,
+  searchChannelVideos,
   worstCaseRequests,
 } from './channelScan';
 import type { ChannelOptions, ChannelVideo } from './channelScan';
@@ -14,7 +15,7 @@ import type { ChannelOptions, ChannelVideo } from './channelScan';
 const UC_ID = 'UCabcdefghijklmnopqrstuv';
 
 function video(videoId: string, overrides: Partial<ChannelVideo> = {}): ChannelVideo {
-  return { videoId, seconds: 120, group: 'co-nhac', hasAudio: true, scanned: false, requests: 10, clipRequests: 3, ...overrides };
+  return { videoId, title: `Video ${videoId}`, seconds: 120, group: 'co-nhac', hasAudio: true, scanned: false, requests: 10, clipRequests: 3, ...overrides };
 }
 
 const ALL: ChannelOptions = { filter: false, musicOnly: false, clips: 0, limit: 0 };
@@ -80,6 +81,24 @@ describe('pickToSend', () => {
 
   it('chỉ xét N video đầu', () => {
     expect(pickToSend(videos, { ...ALL, limit: 1 }).map(({ videoId }) => videoId)).toEqual(['a']);
+  });
+});
+
+describe('searchChannelVideos', () => {
+  const videos = [video('a', { title: 'Máy chế biến gỗ Đức' }), video('b', { title: 'Hướng dẫn bảo trì' })];
+
+  it('tìm không cần gõ dấu và không phân biệt hoa thường', () => {
+    expect(searchChannelVideos(videos, 'may che').map(({ videoId }) => videoId)).toEqual(['a']);
+    expect(searchChannelVideos(videos, 'GỖ ĐỨC').map(({ videoId }) => videoId)).toEqual(['a']);
+    expect(searchChannelVideos(videos, 'huong dan').map(({ videoId }) => videoId)).toEqual(['b']);
+  });
+
+  it('ô tìm trống thì giữ nguyên danh sách', () => {
+    expect(searchChannelVideos(videos, '   ')).toHaveLength(2);
+  });
+
+  it('không khớp thì trả về rỗng', () => {
+    expect(searchChannelVideos(videos, 'khong co')).toEqual([]);
   });
 });
 

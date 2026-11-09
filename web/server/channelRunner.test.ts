@@ -13,7 +13,7 @@ const NO_FILTER: ChannelOptions = { filter: false, musicOnly: false, clips: 0, l
 const BLOCKED = 'YouTube đang chặn máy này tải video.';
 
 function video(videoId: string, overrides: Partial<ChannelVideo> = {}): ChannelVideo {
-  return { videoId, seconds: 60, group: 'co-nhac', hasAudio: true, scanned: false, requests: 5, clipRequests: 2, ...overrides };
+  return { videoId, title: `Video ${videoId}`, seconds: 60, group: 'co-nhac', hasAudio: true, scanned: false, requests: 5, clipRequests: 2, ...overrides };
 }
 
 const VIDEOS = [video('a'), video('b'), video('c', { group: 'khong-nhac' })];

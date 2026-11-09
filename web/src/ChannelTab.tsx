@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { Download, Info, ListVideo, LoaderCircle, Search, ShieldAlert, Tv, Video } from 'lucide-react';
 import { formatDuration } from './batchScan';
@@ -11,6 +11,8 @@ import {
   MAX_CLIPS,
   MIN_CLIPS,
   parseChannelInput,
+  pickPrepared,
+  searchChannelVideos,
   worstCaseRequests,
 } from './channelScan';
 import type {
@@ -21,12 +23,14 @@ import type {
   ChannelRequirements,
   ChannelScanView,
   ChannelStatus,
+  ChannelVideo,
 } from './channelScan';
 import { IconBadge, Panel, SoundBars } from './components';
 
 const API = '/api/channel-scans';
 const POLL_INTERVAL_MS = 3000;
 const PAGE_SIZE = 20;
+const VIDEO_LIST_PAGE_SIZE = 10;
 const DEFAULT_CLIPS = 8;
 const TRY_LIMITS: { value: number; label: string }[] = [
   { value: 1, label: 'Thử 1 video' },
@@ -370,6 +374,94 @@ function ChannelResult({ scan }: { scan: ChannelScanView }) {
   );
 }
 
+function VideoList({ videos, options, maxSeconds }: { videos: ChannelVideo[]; options: ChannelOptions; maxSeconds: number }) {
+  const [query, setQuery] = useState('');
+  const [page, setPage] = useState(0);
+
+  const prepared = useMemo(() => pickPrepared(videos, options).filter(({ scanned }) => !scanned), [videos, options]);
+  const picked = useMemo(() => new Set(prepared.map(({ videoId }) => videoId)), [prepared]);
+  const rows = useMemo(() => searchChannelVideos(videos, query), [videos, query]);
+  const pages = Math.max(1, Math.ceil(rows.length / VIDEO_LIST_PAGE_SIZE));
+  const shownPage = Math.min(page, pages - 1);
+  const start = shownPage * VIDEO_LIST_PAGE_SIZE;
+  const hours = Math.round(videos.reduce((sum, { seconds }) => sum + seconds, 0) / 3600);
+  const onlyMusic = options.filter && options.musicOnly;
+
+  return (
+    <Panel className="overflow-hidden" aria-label="Danh sách video">
+      <div className="space-y-3 p-5">
+        <div>
+          <h3 className="text-xl font-bold text-slate-900">Danh sách video</h3>
+          <p className="text-sm text-slate-500 tabular-nums">
+            {number(videos.length)} video · {number(hours)} giờ · mới nhất ở trên · lần này xử lý {number(prepared.length)} video
+            {onlyMusic && ', chỉ gửi video có nhạc sau khi lọc'}
+          </p>
+        </div>
+        <label className="relative block">
+          <span className="sr-only">Tìm trong danh sách video</span>
+          <Search className="absolute top-2 left-2.5 h-4 w-4 text-slate-400" />
+          <input
+            id="channel-video-search"
+            value={query}
+            placeholder="Tìm theo tên video"
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setPage(0);
+            }}
+            className="w-full rounded-xl border border-brand-200 bg-white py-1.5 pr-3 pl-8 text-xs text-slate-900 outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-100"
+          />
+        </label>
+      </div>
+
+      <ul className="divide-y divide-slate-100 border-y border-slate-100">
+        {rows.slice(start, start + VIDEO_LIST_PAGE_SIZE).map((video) => (
+          <li key={video.videoId} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-5 py-3">
+            <div className="flex min-w-0 flex-[1_1_18rem] gap-3 text-sm">
+              <IconBadge>
+                <Video className="h-4 w-4" />
+              </IconBadge>
+              <div className="min-w-0">
+                <a href={`https://www.youtube.com/watch?v=${video.videoId}`} target="_blank" rel="noreferrer" className="wrap-anywhere font-medium text-slate-800 hover:underline">
+                  {video.title || video.videoId}
+                </a>
+                <p className="text-xs text-slate-500 tabular-nums">
+                  {video.seconds > 0 ? formatDuration(video.seconds) : 'Chưa rõ độ dài'}
+                  {video.seconds > maxSeconds && options.clips === 0 && ` · chỉ quét ${Math.round(maxSeconds / 60)} phút đầu`}
+                </p>
+              </div>
+            </div>
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              {!video.scanned && <span className="text-xs whitespace-nowrap text-slate-500 tabular-nums">{number(worstCaseRequests([video], { ...options, limit: 0 }, maxSeconds))} yêu cầu</span>}
+              {video.scanned ? (
+                <span className={`${PILL} bg-emerald-50 text-emerald-800 ring-emerald-200`}>Đã quét</span>
+              ) : picked.has(video.videoId) ? (
+                <span className={`${PILL} bg-brand-50 text-brand-800 ring-brand-200`}>Sẽ quét</span>
+              ) : (
+                <span className={`${PILL} ${PILL_GREY}`}>Chưa quét</span>
+              )}
+            </div>
+          </li>
+        ))}
+        {rows.length === 0 && <li className="px-5 py-6 text-center text-sm text-slate-500">Không có video nào khớp.</li>}
+      </ul>
+
+      <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-3 text-xs text-slate-500">
+        <span className="tabular-nums">
+          {number(rows.length)} video · trang {shownPage + 1} / {number(pages)}
+        </span>
+        <span className="flex gap-2">
+          <button type="button" disabled={shownPage === 0} onClick={() => setPage(shownPage - 1)} className={SMALL_BUTTON}>
+            Trước
+          </button>
+          <button type="button" disabled={shownPage >= pages - 1} onClick={() => setPage(shownPage + 1)} className={SMALL_BUTTON}>
+            Sau
+          </button>
+        </span>
+      </div>
+    </Panel>
+  );
+}
+
 function RunPanel({
   scan,
   maxRequests,
@@ -487,8 +579,19 @@ export function ChannelTab() {
   const [isBusy, setIsBusy] = useState(false);
   const [message, setMessage] = useState('');
 
+  const listRef = useRef<HTMLDivElement>(null);
+  const scrollToListRef = useRef(false);
+
   const scan = isNew ? null : (state?.scan ?? null);
   const status = scan?.status;
+
+  // Danh sách có thể nằm dưới cột cấu hình, nên cuộn tới để người dùng thấy kết quả của nút vừa bấm.
+  useEffect(() => {
+    if (scrollToListRef.current && status === 'ready') {
+      scrollToListRef.current = false;
+      listRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [status, scan?.id]);
 
   useEffect(() => {
     fetch(`${API}/requirements`)
@@ -531,6 +634,7 @@ export function ChannelTab() {
 
   const handleFetch = (event: FormEvent) => {
     event.preventDefault();
+    scrollToListRef.current = true;
     setOptions(DEFAULT_OPTIONS);
     void run(() => post('', { channel, skipShorts }));
   };
@@ -698,6 +802,11 @@ export function ChannelTab() {
           />
         ) : (
           <EmptyState>Dán link kênh rồi bấm Lấy danh sách video. Tiến trình và báo cáo sẽ hiện ở đây.</EmptyState>
+        )}
+        {scan?.status === 'ready' && (
+          <div ref={listRef} className="min-w-0">
+            <VideoList key={scan.id} videos={videos} options={options} maxSeconds={scan.maxSeconds} />
+          </div>
         )}
         {scan?.status === 'done' && <ChannelResult key={scan.id} scan={scan} />}
       </div>
