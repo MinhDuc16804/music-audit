@@ -11,10 +11,29 @@ import unittest
 from http.server import ThreadingHTTPServer
 
 from music_audit.evaluate import BLOCK, ERROR, HOLD, PASS_NO_MUSIC, identify_summary, parse_scan
-from music_audit.youtube import video_url, youtube_video_id
+from unittest import mock
+
+from music_audit.youtube import YoutubeClient, video_url, youtube_video_id
 from test_flow import ROOT, TOKEN, FakeAcr
 
 VIDEO_ID = "dQw4w9WgXcQ"
+
+
+class VideoDurationsTests(unittest.TestCase):
+    @staticmethod
+    def _page(_path, params):
+        ids = params["id"].split(",")
+        return {"items": [{"id": video_id, "contentDetails": {"duration": "PT1M5S"}} for video_id in ids[:-1]]}
+
+    def test_reads_every_page_and_skips_missing_videos(self):
+        client = YoutubeClient("khoa")
+        ids = [f"video{number:06d}" for number in range(60)]
+        with mock.patch.object(client, "_get", side_effect=self._page) as get:
+            durations = client.video_durations(ids)
+        self.assertEqual(get.call_count, 2)
+        self.assertEqual(len(durations), 58)
+        self.assertEqual(durations["video000000"], 65)
+        self.assertNotIn("video000049", durations)
 
 
 class YoutubeVideoIdTests(unittest.TestCase):

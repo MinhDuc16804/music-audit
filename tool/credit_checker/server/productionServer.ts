@@ -10,7 +10,10 @@ import { stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { join, resolve } from 'node:path';
+import { BATCH_ROUTE } from './batchRunner.ts';
+import { CHANNEL_ROUTE } from './channelRunner.ts';
 import { createHandlers, FILE_ROUTE, ROUTE } from './identifyPlugin.ts';
+import { QUOTA_ROUTE } from './quota.ts';
 import { getContentType, resolveStaticPath } from './staticFiles.ts';
 
 const APP_ROOT = resolve(import.meta.dirname, '..');
@@ -22,7 +25,7 @@ const HEALTH_ROUTE = '/api/health';
 // Tải lên file lớn qua mạng chậm có thể mất nhiều phút.
 const UPLOAD_TIMEOUT_MS = 15 * 60_000;
 
-const { handleLink, handleFile } = createHandlers(() => AUDIT_ROOT);
+const { handleLink, handleFile, handleBatch, handleChannel, handleQuota, startBatches } = createHandlers(() => AUDIT_ROOT);
 
 async function sendStaticFile(request: IncomingMessage, response: ServerResponse, pathname: string) {
   if (request.method !== 'GET' && request.method !== 'HEAD') {
@@ -56,13 +59,22 @@ const server = createServer((request, response) => {
     void handleFile(request, response);
   } else if (pathname === ROUTE) {
     void handleLink(request, response);
+  } else if (pathname === BATCH_ROUTE || pathname.startsWith(`${BATCH_ROUTE}/`)) {
+    void handleBatch(request, response);
+  } else if (pathname === CHANNEL_ROUTE || pathname.startsWith(`${CHANNEL_ROUTE}/`)) {
+    void handleChannel(request, response);
+  } else if (pathname === QUOTA_ROUTE) {
+    void handleQuota(request, response);
   } else {
     void sendStaticFile(request, response, pathname);
   }
 });
 
 server.requestTimeout = UPLOAD_TIMEOUT_MS;
-server.listen(PORT, HOST, () => console.log(`App đang chạy tại http://${HOST}:${PORT}`));
+server.listen(PORT, HOST, () => {
+  console.log(`App đang chạy tại http://${HOST}:${PORT}`);
+  void startBatches();
+});
 
 // Khi chạy trong Docker, server là tiến trình chính nên phải tự xử lý tín hiệu dừng.
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

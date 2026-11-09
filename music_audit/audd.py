@@ -19,6 +19,10 @@ from music_audit.evaluate import Scan, normalize_title
 ENTERPRISE_URL = "https://enterprise.audd.io/"
 CHUNK_SECONDS = 12
 REQUEST_TIMEOUT_SECONDS = 900
+# Quét liền mạch mọi đoạn 12 giây, dùng khi quét cả kênh. Tài liệu AudD không nêu giá trị mặc định của skip và every.
+SCAN_PARAMS = {"accurate_offsets": "true", "skip": "0", "every": "1"}
+# Lỗi của tài khoản: gặp một lần thì mọi video sau cũng lỗi, nên dừng luôn thay vì gửi tiếp.
+ACCOUNT_ERRORS = {900, 901, 904}
 FRIENDLY_ERRORS = {
     900: "Khóa AudD không hợp lệ. Hãy kiểm tra AUDD_API_TOKEN trong file .env.",
     901: "Đã hết lượt miễn phí của AudD hoặc thiếu khóa.",
@@ -31,6 +35,10 @@ FRIENDLY_ERRORS = {
 
 class AuddError(Exception):
     """Lỗi từ API. Không bao giờ chứa khóa."""
+
+    def __init__(self, message, code=None):
+        super().__init__(message)
+        self.code = code
 
 
 class AuddClient:
@@ -57,7 +65,7 @@ class AuddClient:
         except ValueError:
             raise AuddError("AudD trả về dữ liệu không đọc được") from None
         if data.get("status") != "success":
-            raise AuddError(self._error_message(data))
+            raise AuddError(self._error_message(data), code=(data.get("error") or {}).get("error_code"))
         # Chỉ giữ kết quả. Phản hồi của AudD có thể chép lại tham số đã gửi, gồm cả khóa.
         return {"status": "success", "result": data.get("result") or []}
 
@@ -67,14 +75,15 @@ class AuddClient:
         message = FRIENDLY_ERRORS.get(code) or str(error.get("error_message") or "Lỗi không xác định")
         return f"AudD báo lỗi {code}: {message.replace(self._token, '[KHÓA]')[:300]}"
 
-    def recognize_url(self, url, limit):
-        body = urllib.parse.urlencode({"api_token": self._token, "url": url, "limit": limit}).encode("utf-8")
+    def recognize_url(self, url, limit, full_scan=False):
+        fields = {"api_token": self._token, "url": url, "limit": limit, **(SCAN_PARAMS if full_scan else {})}
+        body = urllib.parse.urlencode(fields).encode("utf-8")
         return self._post(body, "application/x-www-form-urlencoded")
 
-    def recognize_file(self, path, limit):
+    def recognize_file(self, path, limit, full_scan=False):
         path = Path(path)
         boundary = uuid.uuid4().hex
-        fields = {"api_token": self._token, "limit": limit}
+        fields = {"api_token": self._token, "limit": limit, **(SCAN_PARAMS if full_scan else {})}
         body = _multipart(boundary, fields, "file", path.name, path.read_bytes())
         return self._post(body, f"multipart/form-data; boundary={boundary}")
 
@@ -99,6 +108,14 @@ def _get_isrc(song):
     apple_music = song.get("apple_music") or {}
     spotify_ids = (song.get("spotify") or {}).get("external_ids") or {}
     return song.get("isrc") or apple_music.get("isrc") or spotify_ids.get("isrc") or ""
+
+
+def _played_seconds(song):
+    """Số giây khớp trong đoạn 12 giây: dùng start_offset, end_offset nếu có, không thì tính cả đoạn."""
+    start, end = song.get("start_offset"), song.get("end_offset")
+    if isinstance(start, (int, float)) and isinstance(end, (int, float)) and end > start:
+        return min(CHUNK_SECONDS, (end - start) / 1000)
+    return CHUNK_SECONDS
 
 
 def parse_audd(raw):
@@ -127,15 +144,18 @@ def parse_audd(raw):
                     "label": song.get("label") or "",
                     "album": song.get("album") or "",
                     "score": score,
-                    "played_duration": CHUNK_SECONDS,
+                    "played_duration": _played_seconds(song),
                     "kind": "music",
                     "isrc": _get_isrc(song),
                     "composers": (song.get("apple_music") or {}).get("composerName") or "",
+                    "offsets": [offset] if offset else [],
                 }
             else:
                 current["score"] = max(current["score"], score)
                 if key not in keys:
-                    current["played_duration"] += CHUNK_SECONDS
+                    current["played_duration"] += _played_seconds(song)
+                    if offset:
+                        current["offsets"].append(offset)
             keys.setdefault(key, song.get("timecode") or "")
         if keys:
             chunks.append((offset, keys))
@@ -147,4 +167,11 @@ def parse_audd(raw):
         {"offset": offset, "tracks": [positions[key] for key in keys], "timecodes": list(keys.values())}
         for offset, keys in chunks
     ]
-    return Scan(state=1, tracks=tracks, music="yes" if tracks else "unknown", segments=segments)
+    return Scan(state=1, tracks=tracks, music="yes" if tracks else "unknown", segments=segments, detects_music=False)
+
+
+def parse_saved(raw):
+    """Đọc bản ghi do submit lưu ở out/raw: {"provider": "audd", "duration_seconds": ..., "response": ...}."""
+    scan = parse_audd(raw.get("response") or {})
+    scan.duration = float(raw.get("duration_seconds") or 0)
+    return scan

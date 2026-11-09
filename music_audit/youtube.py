@@ -16,6 +16,10 @@ _VIDEO_PATHS = {"shorts", "embed", "live", "v"}
 class YoutubeError(Exception):
     """Lỗi từ API. Không bao giờ chứa API key."""
 
+    def __init__(self, message, status=None):
+        super().__init__(message)
+        self.status = status
+
 
 def parse_duration(value):
     """Đổi độ dài ISO 8601 (PT1H2M3S) thành số giây."""
@@ -78,7 +82,7 @@ class YoutubeClient:
             with urllib.request.urlopen(f"{self._base}/{path}?{query}", timeout=60) as response:
                 return json.loads(response.read())
         except urllib.error.HTTPError as error:
-            raise YoutubeError(f"YouTube API trả lỗi {error.code} ở {path}") from None
+            raise YoutubeError(f"YouTube API trả lỗi {error.code} ở {path}", status=error.code) from None
         except urllib.error.URLError as error:
             raise YoutubeError(f"Không kết nối được YouTube API: {error.reason}") from None
 
@@ -87,7 +91,38 @@ class YoutubeClient:
         items = self._get("videos", {"part": "contentDetails", "id": video_id}).get("items") or []
         return parse_duration(items[0]["contentDetails"].get("duration")) if items else 0
 
-    def list_channel_videos(self, channel):
+    def video_durations(self, video_ids):
+        """Trả về độ dài của nhiều video, video không tìm thấy thì không có trong kết quả."""
+        durations = {}
+        for start in range(0, len(video_ids), 50):
+            batch = ",".join(video_ids[start : start + 50])
+            for item in self._get("videos", {"part": "contentDetails", "id": batch}).get("items") or []:
+                durations[item["id"]] = parse_duration(item["contentDetails"].get("duration"))
+        return durations
+
+    def _playlist_video_ids(self, playlist_id):
+        video_ids = []
+        token = None
+        while True:
+            params = {"part": "contentDetails", "playlistId": playlist_id, "maxResults": 50}
+            if token:
+                params["pageToken"] = token
+            page = self._get("playlistItems", params)
+            video_ids += [item["contentDetails"]["videoId"] for item in page.get("items", [])]
+            token = page.get("nextPageToken")
+            if not token:
+                return video_ids
+
+    def _shorts_ids(self, uploads):
+        """Mã các video Shorts của kênh. Danh sách Shorts có mã giống danh sách tải lên, đổi UU thành UUSH."""
+        try:
+            return set(self._playlist_video_ids("UUSH" + uploads[2:]))
+        except YoutubeError as error:
+            if error.status == 404:  # kênh không có Shorts nào
+                return set()
+            raise
+
+    def list_channel_videos(self, channel, include_shorts=True):
         """Trả về danh sách video của kênh kèm độ dài và lượt xem."""
         found = self._get("channels", {"part": "snippet,contentDetails", **channel_filter(channel)})
         items = found.get("items") or []
@@ -96,17 +131,10 @@ class YoutubeClient:
         title = items[0]["snippet"]["title"]
         uploads = items[0]["contentDetails"]["relatedPlaylists"]["uploads"]
 
-        video_ids = []
-        token = None
-        while True:
-            params = {"part": "contentDetails", "playlistId": uploads, "maxResults": 50}
-            if token:
-                params["pageToken"] = token
-            page = self._get("playlistItems", params)
-            video_ids += [item["contentDetails"]["videoId"] for item in page.get("items", [])]
-            token = page.get("nextPageToken")
-            if not token:
-                break
+        video_ids = self._playlist_video_ids(uploads)
+        if not include_shorts:
+            shorts = self._shorts_ids(uploads)
+            video_ids = [video_id for video_id in video_ids if video_id not in shorts]
 
         videos = []
         for start in range(0, len(video_ids), 50):

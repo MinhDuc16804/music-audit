@@ -3,18 +3,26 @@
  * lệnh identify của music-audit, lệnh này tự đọc token trong .env.
  *
  * Cấu hình qua biến môi trường: MUSIC_AUDIT_PYTHON (đường dẫn Python), MUSIC_AUDIT_WORKDIR (nơi lưu out/),
- * MAX_SCANS_PER_USER_PER_DAY (số lượt quét mỗi người mỗi ngày).
+ * MAX_SCANS_PER_USER_PER_DAY (số lượt quét mỗi người mỗi ngày), MAX_CHANNEL_SCAN_REQUESTS (trần yêu cầu AudD mỗi lần quét cả kênh).
  */
 
 import { spawn } from 'node:child_process';
 import { createWriteStream, existsSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
 import { basename, extname, join, resolve } from 'node:path';
 import type { Plugin } from 'vite';
 import { MAX_UPLOAD_BYTES, UPLOAD_TOO_LARGE_MESSAGE } from '../src/uploadLimit.ts';
+import { DEFAULT_MAX_SCAN_SECONDS } from '../src/batchScan.ts';
+import type { BatchCurrentResponse, BatchEstimateResponse } from '../src/batchScan.ts';
+import type { QuotaResponse } from '../src/quota.ts';
+import type { IdentifyResult } from '../src/videoCheck.ts';
 import { getVideoUrl, parseYoutubeVideoId } from '../src/youtubeLink.ts';
+import { parseChannelInput, parseChannelOptions } from '../src/channelScan.ts';
+import { BATCH_ROUTE, BatchError, createBatchRunner, matchBatchRoute, parseBatchVideoIds } from './batchRunner.ts';
+import { CHANNEL_ROUTE, ChannelError, createChannelRunner, matchChannelRoute, parseMaxRequests } from './channelRunner.ts';
+import { AuddCommandError, createQuotaReader, QUOTA_ROUTE } from './quota.ts';
 import { appendUsage, createDailyLimiter, getUserEmail, parseDailyLimit } from './usageLimit.ts';
 import type { UsageEntry } from './usageLimit.ts';
 
@@ -23,6 +31,7 @@ export const FILE_ROUTE = '/api/identify-file';
 const MAX_BODY_BYTES = 2048;
 // AudD trả kết quả ngay trong yêu cầu, file dài có thể mất vài phút.
 const PROCESS_TIMEOUT_MS = 15 * 60_000;
+const AUDD_TIMEOUT_MS = 30_000;
 const MAX_MESSAGE_LENGTH = 300;
 const MAX_NAME_LENGTH = 120;
 const UPLOAD_EXTENSIONS = new Set(['.mp3', '.m4a', '.wav', '.flac', '.aac', '.ogg', '.mp4', '.mov', '.mkv', '.webm']);
@@ -105,35 +114,86 @@ function saveUpload(request: IncomingMessage, targetPath: string): Promise<void>
   });
 }
 
-function runAudit(auditRoot: string, commandArgs: string[]): Promise<unknown> {
-  const workdir = process.env.MUSIC_AUDIT_WORKDIR;
-  const args = ['audit.py', ...(workdir ? ['--workdir', workdir] : []), ...commandArgs];
+interface AuditRun {
+  /** Thư mục data/ và out/ riêng, mặc định theo MUSIC_AUDIT_WORKDIR. */
+  workdir?: string;
+  /** Tiến trình dài như tải cả kênh thì không đặt giới hạn thời gian. */
+  noTimeout?: boolean;
+  onLine?: (line: string) => void;
+}
 
-  return new Promise((resolveResult, reject) => {
-    const child = spawn(getPythonCommand(), args, {
-      cwd: auditRoot,
-      windowsHide: true,
-      timeout: PROCESS_TIMEOUT_MS,
-      env: { ...process.env, PYTHONUTF8: '1' },
-    });
+/** Quét cả kênh luôn dùng AudD như các màn hình khác, kể cả khi .env có khóa ACRCloud. */
+const CHANNEL_ENV = { MUSIC_SERVICE: 'audd' };
+
+function startAudit(auditRoot: string, commandArgs: string[], run: AuditRun = {}, extraEnv: Record<string, string> = {}) {
+  const workdir = run.workdir ?? process.env.MUSIC_AUDIT_WORKDIR;
+  const args = ['audit.py', ...(workdir ? ['--workdir', workdir] : []), ...commandArgs];
+  const child = spawn(getPythonCommand(), args, {
+    cwd: auditRoot,
+    windowsHide: true,
+    timeout: run.noTimeout ? undefined : PROCESS_TIMEOUT_MS,
+    env: { ...process.env, PYTHONUTF8: '1', ...extraEnv },
+  });
+
+  const done = new Promise<string>((resolveResult, reject) => {
     let output = '';
+    let partial = '';
     let errorOutput = '';
-    child.stdout.setEncoding('utf8').on('data', (chunk: string) => (output += chunk));
+    child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
+      output += chunk;
+      if (run.onLine) {
+        const lines = `${partial}${chunk}`.split('\n');
+        partial = lines.pop() ?? '';
+        lines.forEach(run.onLine);
+      }
+    });
     child.stderr.setEncoding('utf8').on('data', (chunk: string) => (errorOutput += chunk));
     child.on('error', () => reject(new Error('Không chạy được Python. Hãy kiểm tra Python đã được cài.')));
     child.on('close', (code) => {
       if (code !== 0) {
         const lastLine = errorOutput.trim().split('\n').at(-1) ?? '';
-        reject(new Error(lastLine.slice(0, MAX_MESSAGE_LENGTH) || 'Lệnh identify không chạy xong.'));
+        reject(new Error(lastLine.slice(0, MAX_MESSAGE_LENGTH) || 'Lệnh quét không chạy xong.'));
         return;
       }
-      try {
-        resolveResult(JSON.parse(output));
-      } catch {
-        reject(new Error('Không đọc được kết quả của lệnh identify.'));
+      resolveResult(output);
+    });
+  });
+  return { done, stop: () => child.kill() };
+}
+
+/** Không đưa nguyên văn lỗi của công cụ ra ngoài, chỉ phân loại để tab báo đúng việc cần làm. */
+function runAuddCommand(args: string[]): Promise<string> {
+  return new Promise((resolveResult, reject) => {
+    const child = spawn(process.env.AUDD_CLI ?? 'audd', args, {
+      windowsHide: true,
+      timeout: AUDD_TIMEOUT_MS,
+      env: { ...process.env, CI: '1', AUDD_NO_UPDATE_CHECK: '1' },
+    });
+    let output = '';
+    let errorOutput = '';
+    child.stdout.setEncoding('utf8').on('data', (chunk: string) => (output += chunk));
+    child.stderr.setEncoding('utf8').on('data', (chunk: string) => (errorOutput += chunk));
+    child.on('error', () => reject(new AuddCommandError('missing')));
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolveResult(output);
+      } else {
+        reject(new AuddCommandError(/log\s?in|sign.?in|unauthenticated/i.test(`${errorOutput}${output}`) ? 'login' : 'error'));
       }
     });
   });
+}
+
+function parseAuditOutput(output: string): unknown {
+  try {
+    return JSON.parse(output);
+  } catch {
+    throw new Error('Không đọc được kết quả của lệnh quét.');
+  }
+}
+
+function runAudit(auditRoot: string, commandArgs: string[]): Promise<unknown> {
+  return startAudit(auditRoot, commandArgs).done.then(parseAuditOutput);
 }
 
 function parseRequestedVideoId(body: string): string {
@@ -149,17 +209,185 @@ export function createHandlers(getAuditRoot: () => string) {
   // Lệnh identify đọc rồi ghi lại out/submissions.json, chạy song song có thể làm mất dữ liệu và quét trùng.
   let queue: Promise<unknown> = Promise.resolve();
 
-  const enqueue = (commandArgs: string[] | (() => string[])) => {
-    const job = queue.then(() => runAudit(getAuditRoot(), typeof commandArgs === 'function' ? commandArgs() : commandArgs));
+  const enqueueJob = <T,>(work: () => Promise<T>) => {
+    const job = queue.then(work);
     queue = job.catch(() => undefined);
     return job;
   };
 
-  const allowScan = createDailyLimiter(parseDailyLimit(process.env.MAX_SCANS_PER_USER_PER_DAY));
+  const enqueue = (commandArgs: string[]) => enqueueJob(() => runAudit(getAuditRoot(), commandArgs));
 
-  const logUsage = (user: string, kind: UsageEntry['kind'], target: string, outcome: UsageEntry['outcome']) => {
-    const workdir = process.env.MUSIC_AUDIT_WORKDIR ?? getAuditRoot();
-    return appendUsage(join(workdir, 'out', 'usage.jsonl'), { time: new Date().toISOString(), user, kind, target, outcome });
+  const allowScan = createDailyLimiter(parseDailyLimit(process.env.MAX_SCANS_PER_USER_PER_DAY));
+  const getOutFolder = () => join(process.env.MUSIC_AUDIT_WORKDIR ?? getAuditRoot(), 'out');
+
+  const logUsage = (user: string, kind: UsageEntry['kind'], target: string, outcome: UsageEntry['outcome']) =>
+    appendUsage(join(getOutFolder(), 'usage.jsonl'), { time: new Date().toISOString(), user, kind, target, outcome });
+
+  // audit.py lưu kết quả AudD theo mã video, nên có file này nghĩa là quét lại không tốn thêm.
+  const isCached = (videoId: string) => existsSync(join(getOutFolder(), 'audd', `${videoId}.json`));
+
+  const batchRunner = createBatchRunner({
+    getFilePath: () => join(getOutFolder(), 'batches.json'),
+    isCached,
+    scan: (url) => enqueue(['identify', url, '--extract']) as Promise<IdentifyResult>,
+    reserve: allowScan,
+    release: allowScan.release,
+    logResult: (user, target, outcome) => logUsage(user, 'batch', target, outcome),
+  });
+
+  const maxChannelRequests = parseMaxRequests(process.env.MAX_CHANNEL_SCAN_REQUESTS);
+  const quotaReader = createQuotaReader({ run: runAuddCommand });
+
+  const handleQuota = async (request: IncomingMessage, response: ServerResponse) => {
+    if (request.method !== 'GET') {
+      sendJson(response, 405, { error: 'Chỉ nhận GET' });
+      return;
+    }
+    const { originalUrl } = request as IncomingMessage & { originalUrl?: string };
+    const { searchParams } = new URL(originalUrl ?? request.url ?? '/', 'http://localhost');
+    const user = getUserEmail(request.headers);
+    sendJson(response, 200, {
+      ...(await quotaReader.read(searchParams.has('refresh'))),
+      remainingScans: allowScan.remaining(user),
+      dailyLimit: allowScan.maxPerDay,
+      maxChannelRequests,
+    } satisfies QuotaResponse);
+  };
+
+  const channelRunner = createChannelRunner({
+    getFilePath: () => join(getOutFolder(), 'channel-scans.json'),
+    getWorkdir: (channelKey) => join(getOutFolder(), 'channels', channelKey),
+    runStep: (workdir, args, onLine) => {
+      const ready = mkdir(workdir, { recursive: true });
+      let stop = () => undefined as unknown;
+      const done = ready
+        .then(() => {
+          const step = startAudit(getAuditRoot(), args, { workdir, noTimeout: true, onLine }, CHANNEL_ENV);
+          stop = step.stop;
+          return step.done;
+        })
+        .then(() => undefined);
+      return { done, stop: () => stop() };
+    },
+    runQueued: (workdir, args) => enqueueJob(() => startAudit(getAuditRoot(), args, { workdir }, CHANNEL_ENV).done),
+    readJson: (workdir, args) => startAudit(getAuditRoot(), args, { workdir }, CHANNEL_ENV).done.then(parseAuditOutput),
+    removeAudio: (workdir) => rm(join(workdir, 'data', 'audio'), { recursive: true, force: true }),
+    logUsage: (user, target, outcome) => logUsage(user, 'channel', target, outcome),
+    maxRequests: maxChannelRequests,
+  });
+
+  const handleChannel = async (request: IncomingMessage, response: ServerResponse) => {
+    const { originalUrl } = request as IncomingMessage & { originalUrl?: string };
+    const { pathname } = new URL(originalUrl ?? request.url ?? '/', 'http://localhost');
+    const route = matchChannelRoute(request.method, pathname);
+    if (!route) {
+      sendJson(response, 404, { error: 'Không tìm thấy' });
+      return;
+    }
+    if (request.method === 'POST' && !isSameOriginJson(request.headers['content-type'], request.headers.origin, request.headers.host)) {
+      sendJson(response, 403, { error: 'Yêu cầu không hợp lệ' });
+      return;
+    }
+
+    const user = getUserEmail(request.headers);
+    const sendCurrent = async (status = 200) => sendJson(response, status, await channelRunner.current(user));
+    try {
+      if (route.action === 'current') {
+        await sendCurrent();
+      } else if (route.action === 'requirements') {
+        sendJson(response, 200, await startAudit(getAuditRoot(), ['channel-check']).done.then(parseAuditOutput));
+      } else if (route.action === 'report') {
+        sendJson(response, 200, await channelRunner.report(user, route.scanId));
+      } else if (route.action === 'create') {
+        const { channel, skipShorts } = JSON.parse(await readBody(request)) as { channel?: unknown; skipShorts?: unknown };
+        const parsed = typeof channel === 'string' ? parseChannelInput(channel) : null;
+        if (!parsed) {
+          sendJson(response, 400, { error: 'Chỉ nhận link kênh có @handle hoặc mã UC…, không nhận link video hay playlist.' });
+          return;
+        }
+        await channelRunner.create(user, parsed, skipShorts === true);
+        await sendCurrent(201);
+      } else if (route.action === 'start') {
+        const options = parseChannelOptions(JSON.parse(await readBody(request)));
+        if (!options) {
+          sendJson(response, 400, { error: 'Cách quét không hợp lệ.' });
+          return;
+        }
+        await channelRunner.start(user, route.scanId, options);
+        await sendCurrent();
+      } else {
+        await channelRunner[route.action](user, route.scanId);
+        await sendCurrent();
+      }
+    } catch (error) {
+      const status = error instanceof ChannelError ? error.status : error instanceof SyntaxError ? 400 : 502;
+      sendJson(response, status, { error: error instanceof Error ? error.message : 'Lỗi không xác định' });
+    }
+  };
+
+  /** Không qua hàng đợi vì chỉ đọc độ dài video, không nên phải chờ các lượt quét đang chạy. */
+  const estimateBatch = async (videoIds: string[]): Promise<BatchEstimateResponse> => {
+    const pending = videoIds.filter((videoId) => !isCached(videoId));
+    const info = (pending.length ? await runAudit(getAuditRoot(), ['durations', ...pending]).catch(() => null) : null) as
+      | { max_seconds?: number; videos?: Record<string, number> }
+      | null;
+    return {
+      maxSeconds: info?.max_seconds ?? DEFAULT_MAX_SCAN_SECONDS,
+      videos: videoIds.map((videoId) => ({ videoId, cached: isCached(videoId), seconds: info?.videos?.[videoId] ?? 0 })),
+    };
+  };
+
+  const getBatchState = async (user: string): Promise<BatchCurrentResponse> => ({
+    batch: await batchRunner.current(user),
+    remainingScans: allowScan.remaining(user),
+    dailyLimit: allowScan.maxPerDay,
+  });
+
+  const handleBatch = async (request: IncomingMessage, response: ServerResponse) => {
+    // Server của Vite cắt tiền tố khỏi request.url nhưng giữ đường dẫn gốc ở originalUrl.
+    const { originalUrl } = request as IncomingMessage & { originalUrl?: string };
+    const { pathname } = new URL(originalUrl ?? request.url ?? '/', 'http://localhost');
+    const route = matchBatchRoute(request.method, pathname);
+    if (!route) {
+      sendJson(response, 404, { error: 'Không tìm thấy' });
+      return;
+    }
+    if (request.method === 'POST' && !isSameOriginJson(request.headers['content-type'], request.headers.origin, request.headers.host)) {
+      sendJson(response, 403, { error: 'Yêu cầu không hợp lệ' });
+      return;
+    }
+
+    const user = getUserEmail(request.headers);
+    try {
+      if (route.action === 'current') {
+        sendJson(response, 200, await getBatchState(user));
+      } else if (route.action === 'create' || route.action === 'estimate') {
+        const videoIds = parseBatchVideoIds(await readBody(request));
+        if (!videoIds) {
+          sendJson(response, 400, { error: 'Danh sách video không hợp lệ.' });
+        } else if (route.action === 'estimate') {
+          sendJson(response, 200, await estimateBatch(videoIds));
+        } else {
+          await batchRunner.create(user, videoIds);
+          sendJson(response, 202, await getBatchState(user));
+        }
+      } else {
+        if (route.action === 'retry') {
+          await batchRunner.retry(user, route.batchId, route.videoId);
+        } else if (route.action === 'cancel') {
+          await batchRunner.cancel(user, route.batchId);
+        } else {
+          await batchRunner.resume(user, route.batchId);
+        }
+        sendJson(response, 200, await getBatchState(user));
+      }
+    } catch (error) {
+      if (error instanceof BatchError) {
+        sendJson(response, error.status, { error: error.message });
+      } else {
+        sendJson(response, 500, { error: error instanceof Error ? error.message : 'Lỗi không xác định' });
+      }
+    }
   };
 
   /** Hết lượt thì báo lỗi và trả về false. */
@@ -241,12 +469,12 @@ export function createHandlers(getAuditRoot: () => string) {
     }
   };
 
-  return { handleLink, handleFile };
+  return { handleLink, handleFile, handleBatch, handleChannel, handleQuota, startBatches: batchRunner.start };
 }
 
 export function identifyPlugin(): Plugin {
   let auditRoot = '';
-  const { handleLink, handleFile } = createHandlers(() => auditRoot);
+  const { handleLink, handleFile, handleBatch, handleChannel, handleQuota, startBatches } = createHandlers(() => auditRoot);
 
   return {
     name: 'music-audit-identify',
@@ -256,10 +484,18 @@ export function identifyPlugin(): Plugin {
     configureServer(server) {
       server.middlewares.use(FILE_ROUTE, handleFile);
       server.middlewares.use(ROUTE, handleLink);
+      server.middlewares.use(BATCH_ROUTE, handleBatch);
+      server.middlewares.use(CHANNEL_ROUTE, handleChannel);
+      server.middlewares.use(QUOTA_ROUTE, handleQuota);
+      void startBatches();
     },
     configurePreviewServer(server) {
       server.middlewares.use(FILE_ROUTE, handleFile);
       server.middlewares.use(ROUTE, handleLink);
+      server.middlewares.use(BATCH_ROUTE, handleBatch);
+      server.middlewares.use(CHANNEL_ROUTE, handleChannel);
+      server.middlewares.use(QUOTA_ROUTE, handleQuota);
+      void startBatches();
     },
   };
 }

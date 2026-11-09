@@ -14,7 +14,7 @@ const DEFAULT_MAX_SCANS_PER_DAY = 30;
 export interface UsageEntry {
   time: string;
   user: string;
-  kind: 'link' | 'file';
+  kind: 'link' | 'file' | 'batch' | 'channel';
   target: string;
   outcome: 'done' | 'error' | 'limited';
 }
@@ -35,20 +35,37 @@ export function createDailyLimiter(maxPerDay: number, getToday: () => string = (
   let day = '';
   let counts = new Map<string, number>();
 
-  /** Tính một lượt cho người này. Trả về false nếu đã hết lượt trong ngày. */
-  return (user: string): boolean => {
+  const startNewDayIfNeeded = () => {
     const today = getToday();
     if (today !== day) {
       day = today;
       counts = new Map();
     }
+  };
+
+  /** Tính từng ấy lượt cho người này, đủ thì tính hết, không đủ thì trả về false và không tính lượt nào. */
+  const take = (user: string, count = 1): boolean => {
+    startNewDayIfNeeded();
     const used = counts.get(user) ?? 0;
-    if (used >= maxPerDay) {
+    if (used + count > maxPerDay) {
       return false;
     }
-    counts.set(user, used + 1);
+    counts.set(user, used + count);
     return true;
   };
+
+  const remaining = (user: string): number => {
+    startNewDayIfNeeded();
+    return Math.max(0, maxPerDay - (counts.get(user) ?? 0));
+  };
+
+  /** Hoàn lại lượt đã giữ nhưng không dùng đến. */
+  const release = (user: string, count: number): void => {
+    startNewDayIfNeeded();
+    counts.set(user, Math.max(0, (counts.get(user) ?? 0) - count));
+  };
+
+  return Object.assign(take, { remaining, release, maxPerDay });
 }
 
 /** Lỗi ghi nhật ký không được làm hỏng lượt quét đã xong. */

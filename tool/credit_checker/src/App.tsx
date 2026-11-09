@@ -3,36 +3,39 @@ import type { FormEvent, ReactNode } from 'react';
 import {
   AudioLines,
   Clock,
-  BookOpen,
-  CheckCircle2,
   CloudUpload,
   ExternalLink,
+  Gauge,
   Info,
   Library,
   Link2,
   ListChecks,
+  ListVideo,
   LoaderCircle,
   Music,
   ShieldAlert,
   ShieldCheck,
   ShieldQuestion,
   ShieldX,
+  Tv,
   Video,
 } from 'lucide-react';
 import { buildAudioLibraryIndex, isAudioLibraryFile } from './audioLibrary';
 import type { AudioLibraryFile, AudioLibraryIndex } from './audioLibrary';
+import { BatchTab } from './BatchTab';
+import { MAX_BATCH_VIDEOS } from './batchScan';
+import { ChannelTab } from './ChannelTab';
 import { RESOURCE_GROUPS } from './catalog';
 import type { MusicResource } from './catalog';
+import { Panel, SectionTitle, SoundBars, TrackList } from './components';
 import { readMediaDuration } from './mediaDuration';
+import { QuotaTab } from './QuotaTab';
 import { MAX_UPLOAD_BYTES, MAX_UPLOAD_MB, UPLOAD_TOO_LARGE_MESSAGE } from './uploadLimit';
-import { getVideoVerdict, needsStudioLookup } from './videoCheck';
+import { getVideoVerdict } from './videoCheck';
 import type { IdentifyResult, VideoVerdictKind } from './videoCheck';
 import { parseYoutubeVideoId } from './youtubeLink';
 
-type TabId = 'video' | 'guide' | 'library';
-
-/** "UC" không kèm mã kênh: Studio tự chuyển sang kênh của tài khoản đang đăng nhập. */
-const STUDIO_MUSIC_URL = 'https://studio.youtube.com/channel/UC/music';
+type TabId = 'video' | 'batch' | 'channel' | 'quota' | 'library';
 
 interface AudioLibraryState {
   status: 'loading' | 'ready' | 'failed';
@@ -48,10 +51,22 @@ const TABS: { id: TabId; label: string; description: string; icon: ReactNode }[]
     icon: <Video className="h-4 w-4" />,
   },
   {
-    id: 'guide',
-    label: 'Quy trình & Pháp lý',
-    description: 'Các bước cần hoàn tất và khái niệm cần nắm trước khi đăng nội dung.',
-    icon: <BookOpen className="h-4 w-4" />,
+    id: 'batch',
+    label: 'Quét hàng loạt',
+    description: 'Dán nhiều link YouTube để quét một lượt. Mỗi video vẫn được kết luận theo đúng luật của màn hình Kiểm tra nhạc.',
+    icon: <ListVideo className="h-4 w-4" />,
+  },
+  {
+    id: 'channel',
+    label: 'Quét cả kênh',
+    description: 'Lấy toàn bộ video của một kênh, lọc video có nhạc ngay trên máy chủ rồi nhận diện bài. Kết quả gồm báo cáo theo video và danh sách bài.',
+    icon: <Tv className="h-4 w-4" />,
+  },
+  {
+    id: 'quota',
+    label: 'Theo dõi hạn mức',
+    description: 'Xem tài khoản AudD đang dùng gói nào, đã dùng bao nhiêu yêu cầu và còn lại bao nhiêu.',
+    icon: <Gauge className="h-4 w-4" />,
   },
   {
     id: 'library',
@@ -80,41 +95,25 @@ const VERDICT_LEGEND = [
   { title: 'Không được dùng', body: 'Có bài nằm ngoài thư viện.', icon: <ShieldX className="h-4 w-4 text-rose-700" /> },
 ];
 
-/** Chiều cao các thanh sóng âm trang trí, tính theo phần trăm. */
-const SOUND_BAR_HEIGHTS = [35, 62, 48, 86, 58, 100, 70, 44, 78, 54, 92, 40, 66, 84, 50, 30];
-
-const LEGAL_TOPICS = [
-  {
-    title: 'Bản phổ và bản thu',
-    body: 'Một bài nhạc có hai lớp quyền: phần sáng tác (Composition) và bản thu (Master Recording). Bản phổ đã tự do không có nghĩa là mọi bản thu của nó đều tự do.',
-  },
-  {
-    title: 'Sync License',
-    body: 'Giấy phép đưa nhạc vào hình ảnh như video, quảng cáo hoặc phim. Thường cần xin từ cả bên giữ quyền sáng tác lẫn bên giữ bản thu.',
-  },
-  {
-    title: 'Thương mại và phi thương mại',
-    body: 'Thương mại không chỉ là quảng cáo. Video kiếm tiền, nội dung của doanh nghiệp hay bài có tài trợ thường đều bị coi là thương mại, nên giấy phép "phi thương mại" không đủ.',
-  },
-  {
-    title: 'Lưu hóa đơn và giấy phép',
-    body: 'Giữ giấy phép, hóa đơn và ảnh chụp trang điều khoản tại thời điểm tải nhạc. Đây là bằng chứng khi kháng nghị, vì điều khoản có thể thay đổi sau này.',
-  },
-];
-
-const CHECKLIST_ITEMS = [
-  'Đã xác định tác giả và người giữ quyền của bài',
-  'Đã kiểm tra cả phần sáng tác lẫn bản thu',
-  'Giấy phép bao gồm đúng mục đích và nền tảng sử dụng',
-  'Đã ghi nguồn đúng mẫu nếu giấy phép yêu cầu',
-  'Đã lưu giấy phép và hóa đơn vào hồ sơ dự án',
-];
-
 const SCAN_FACTS = [
   { label: 'Link YouTube công khai', icon: <Link2 className="h-3.5 w-3.5" /> },
   { label: 'MP3, WAV, MP4, MOV và nhiều định dạng khác', icon: <Music className="h-3.5 w-3.5" /> },
   { label: `File tối đa ${MAX_UPLOAD_MB} MB`, icon: <CloudUpload className="h-3.5 w-3.5" /> },
   { label: 'Quét 60 phút đầu', icon: <Clock className="h-3.5 w-3.5" /> },
+];
+
+const BATCH_FACTS = [
+  { label: `Tối đa ${MAX_BATCH_VIDEOS} video mỗi lô`, icon: <ListVideo className="h-3.5 w-3.5" /> },
+  { label: 'Chạy nền, đóng tab vẫn tiếp tục', icon: <AudioLines className="h-3.5 w-3.5" /> },
+  { label: 'Video đã quét không tốn thêm lượt', icon: <ShieldCheck className="h-3.5 w-3.5" /> },
+  { label: 'Quét 60 phút đầu mỗi video', icon: <Clock className="h-3.5 w-3.5" /> },
+];
+
+const CHANNEL_FACTS = [
+  { label: 'Hỏi lại chi phí trước khi gửi AudD', icon: <ShieldCheck className="h-3.5 w-3.5" /> },
+  { label: 'Chạy nền, đóng tab vẫn tiếp tục', icon: <AudioLines className="h-3.5 w-3.5" /> },
+  { label: 'Video đã quét không tốn thêm lượt', icon: <ListChecks className="h-3.5 w-3.5" /> },
+  { label: 'Quét 60 phút đầu mỗi video', icon: <Clock className="h-3.5 w-3.5" /> },
 ];
 
 /** Nạp danh sách thư viện. Không nạp được thì app không quét, để không chặn nhầm mọi bài. */
@@ -148,32 +147,10 @@ function useAudioLibrary(): AudioLibraryState {
   return library;
 }
 
-function Panel({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return <div className={`rounded-2xl border border-brand-100 bg-white shadow-card ${className}`}>{children}</div>;
-}
-
-function SoundBars({ className = '' }: { className?: string }) {
-  return (
-    <div aria-hidden="true" className={`sound-bars ${className}`}>
-      {SOUND_BAR_HEIGHTS.map((height, position) => (
-        <span key={position} style={{ height: `${height}%`, animationDelay: `${position * -0.17}s` }} />
-      ))}
-    </div>
-  );
-}
-
-function IconBadge({ children }: { children: ReactNode }) {
-  return <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-700">{children}</span>;
-}
-
-function SectionTitle({ children }: { children: ReactNode }) {
-  return <h3 className="text-sm font-semibold text-slate-900">{children}</h3>;
-}
-
-function ScanFacts() {
+function ScanFacts({ facts }: { facts: typeof SCAN_FACTS }) {
   return (
     <ul className="mt-4 flex flex-wrap gap-2">
-      {SCAN_FACTS.map((fact) => (
+      {facts.map((fact) => (
         <li
           key={fact.label}
           className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-xs font-medium text-white ring-1 ring-inset ring-white/20"
@@ -196,42 +173,11 @@ function PageHero({ tab }: { tab: (typeof TABS)[number] }) {
           {tab.label}
         </h1>
         <p className="mt-2 max-w-2xl text-sm text-brand-100">{tab.description}</p>
-        {tab.id === 'video' && <ScanFacts />}
+        {tab.id === 'video' && <ScanFacts facts={SCAN_FACTS} />}
+        {tab.id === 'batch' && <ScanFacts facts={BATCH_FACTS} />}
+        {tab.id === 'channel' && <ScanFacts facts={CHANNEL_FACTS} />}
       </div>
     </header>
-  );
-}
-
-/** Chép tên bài rồi mở Studio. Trang http không có quyền chép thì vẫn mở Studio và báo người duyệt tự chép. */
-function StudioLookupLink({ title }: { title: string }) {
-  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
-
-  function copyTitle() {
-    if (!navigator.clipboard) {
-      setCopyStatus('failed');
-      return;
-    }
-    navigator.clipboard.writeText(title).then(
-      () => setCopyStatus('copied'),
-      () => setCopyStatus('failed'),
-    );
-  }
-
-  return (
-    <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-      <a
-        href={STUDIO_MUSIC_URL}
-        target="_blank"
-        rel="noreferrer"
-        onClick={copyTitle}
-        className="inline-flex items-center gap-1 whitespace-nowrap rounded-lg border border-brand-200 bg-white px-2 py-1 font-medium text-brand-800 hover:bg-brand-50"
-      >
-        <ExternalLink className="h-3.5 w-3.5" />
-        Tra trong Studio
-      </a>
-      {copyStatus === 'copied' && <span className="text-slate-500">Đã chép tên bài. Dán vào ô tìm kiếm của Studio.</span>}
-      {copyStatus === 'failed' && <span className="text-amber-800">Không tự chép được. Hãy chép tay tên bài ở trên.</span>}
-    </p>
   );
 }
 
@@ -444,65 +390,7 @@ function VideoTab({ library }: { library: AudioLibraryState }) {
           {verdict.tracks.length > 0 && (
             <section className="space-y-2 px-5 py-4">
               <SectionTitle>Bài máy nhận ra ({verdict.tracks.length})</SectionTitle>
-              <ul className="divide-y divide-slate-100">
-                {verdict.tracks.map(({ track, libraryTrack, nearTrack, isDoubtful, isIgnored }) => (
-                  <li key={`${track.title}-${track.artists}`} className="flex flex-col gap-2 py-3 md:flex-row md:items-center md:justify-between md:gap-4">
-                    <div className="flex min-w-0 gap-3 text-sm">
-                      <IconBadge>
-                        <Music className="h-4 w-4" />
-                      </IconBadge>
-                      <div className="min-w-0">
-                      <p className="font-medium text-slate-800">{track.title}</p>
-                      <p className="text-xs text-slate-500">
-                        {[track.artists, track.label, track.isrc && `ISRC ${track.isrc}`].filter(Boolean).join(' · ')}
-                      </p>
-                      {track.composers && <p className="text-xs text-slate-500">Sáng tác: {track.composers}</p>}
-                      {nearTrack && (
-                        <p className="text-xs text-amber-800">
-                          Trong thư viện có: {nearTrack.title} · {nearTrack.artist}
-                        </p>
-                      )}
-                      {libraryTrack?.attribution && (
-                        <p className="text-xs font-medium text-amber-800">
-                          Phải ghi nguồn trong mô tả video, lấy đúng mẫu trong YouTube Audio Library.
-                        </p>
-                      )}
-                      {needsStudioLookup({ libraryTrack, isIgnored }) && <StudioLookupLink title={track.title} />}
-                      </div>
-                    </div>
-                    <span
-                      className={`inline-flex w-fit shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${
-                        isIgnored
-                          ? 'bg-slate-100 text-slate-600 ring-slate-200'
-                          : nearTrack || isDoubtful || libraryTrack?.unconfirmed
-                          ? 'bg-amber-50 text-amber-800 ring-amber-200'
-                          : libraryTrack
-                            ? 'bg-emerald-50 text-emerald-800 ring-emerald-200'
-                            : 'bg-rose-50 text-rose-800 ring-rose-200'
-                      }`}
-                    >
-                      {nearTrack || isDoubtful || isIgnored || libraryTrack?.unconfirmed ? (
-                        <ShieldAlert className="h-4 w-4" />
-                      ) : libraryTrack ? (
-                        <ShieldCheck className="h-4 w-4" />
-                      ) : (
-                        <ShieldX className="h-4 w-4" />
-                      )}
-                      {nearTrack
-                        ? 'Gần khớp'
-                        : isIgnored
-                          ? 'Có thể nhận nhầm'
-                          : isDoubtful
-                          ? 'Cần nghe lại'
-                          : libraryTrack?.unconfirmed
-                            ? 'Chưa xác nhận lại'
-                            : libraryTrack
-                              ? 'Có trong thư viện'
-                              : 'Không có trong thư viện'}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+              <TrackList tracks={verdict.tracks} />
             </section>
           )}
 
@@ -542,61 +430,6 @@ function VideoTab({ library }: { library: AudioLibraryState }) {
         </Panel>
         )
       )}
-    </div>
-  );
-}
-
-function GuideTab() {
-  const [checkedItems, setCheckedItems] = useState<string[]>([]);
-
-  const toggleItem = (item: string) => {
-    setCheckedItems((current) =>
-      current.includes(item) ? current.filter((value) => value !== item) : [...current, item],
-    );
-  };
-
-  return (
-    <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
-      <Panel className="p-5">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-          <CheckCircle2 className="h-4 w-4 text-brand-700" />
-          Checklist trước khi đăng ({checkedItems.length}/{CHECKLIST_ITEMS.length})
-        </h2>
-        <div className="mt-3 h-2 overflow-hidden rounded-full bg-brand-50">
-          <div
-            className="h-full rounded-full bg-linear-to-r from-brand-400 to-brand-600 transition-all"
-            style={{ width: `${(checkedItems.length / CHECKLIST_ITEMS.length) * 100}%` }}
-          />
-        </div>
-        <ul className="mt-4 space-y-2">
-          {CHECKLIST_ITEMS.map((item) => (
-            <li key={item}>
-              <label className="flex cursor-pointer items-start gap-2.5 rounded-xl bg-brand-50/60 px-3 py-2.5 text-sm text-slate-700 hover:bg-brand-50">
-                <input
-                  type="checkbox"
-                  checked={checkedItems.includes(item)}
-                  onChange={() => toggleItem(item)}
-                  className="mt-0.5 accent-brand-700"
-                />
-                {item}
-              </label>
-            </li>
-          ))}
-        </ul>
-      </Panel>
-
-      <Panel className="divide-y divide-brand-100">
-        <h2 className="flex items-center gap-2 p-5 text-sm font-semibold text-slate-900">
-          <BookOpen className="h-4 w-4 text-brand-700" />
-          Khái niệm cần biết
-        </h2>
-        {LEGAL_TOPICS.map((topic) => (
-          <div key={topic.title} className="p-5">
-            <SectionTitle>{topic.title}</SectionTitle>
-            <p className="mt-1 text-sm text-slate-600">{topic.body}</p>
-          </div>
-        ))}
-      </Panel>
     </div>
   );
 }
@@ -690,8 +523,14 @@ export default function App() {
           <div hidden={activeTab !== 'video'}>
             <VideoTab library={library} />
           </div>
-          <div hidden={activeTab !== 'guide'}>
-            <GuideTab />
+          <div hidden={activeTab !== 'batch'}>
+            <BatchTab libraryIndex={library.index} isLibraryReady={library.status === 'ready'} />
+          </div>
+          <div hidden={activeTab !== 'channel'}>
+            <ChannelTab />
+          </div>
+          <div hidden={activeTab !== 'quota'}>
+            <QuotaTab />
           </div>
           <div hidden={activeTab !== 'library'}>
             <LibraryTab />

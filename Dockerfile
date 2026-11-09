@@ -13,13 +13,20 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 # yt-dlp hay hỏng khi YouTube thay đổi, nên build lại image với --no-cache để lấy bản mới.
 RUN python3 -m venv /opt/venv && /opt/venv/bin/pip install --no-cache-dir "yt-dlp[default]"
+# Công cụ của AudD để tab Theo dõi hạn mức đọc gói và số yêu cầu. Cài hỏng thì app vẫn chạy, tab sẽ báo thiếu công cụ.
+RUN /opt/venv/bin/pip install --no-cache-dir audd-cli==0.1.4 || echo "Không cài được audd-cli"
 
 WORKDIR /app
+# Máy lọc nhạc cho tab Quét cả kênh. Cài hỏng thì app vẫn chạy, tab sẽ báo thiếu mô hình và vẫn quét được khi tắt lọc.
+COPY requirements-detect.txt ./
+RUN /opt/venv/bin/pip install --no-cache-dir -r requirements-detect.txt || echo "Không cài được thư viện lọc nhạc"
+RUN mkdir models && /opt/venv/bin/python -c "import urllib.request as u; u.urlretrieve('https://storage.googleapis.com/mediapipe-models/audio_classifier/yamnet/float32/latest/yamnet.tflite', 'models/yamnet.tflite'); u.urlretrieve('https://raw.githubusercontent.com/tensorflow/models/master/research/audioset/yamnet/yamnet_class_map.csv', 'models/yamnet_class_map.csv')" || echo "Không tải được mô hình lọc nhạc"
 COPY audit.py ./
 COPY music_audit ./music_audit
+COPY resources ./resources
 COPY tool/credit_checker/package.json ./tool/credit_checker/
 COPY tool/credit_checker/server ./tool/credit_checker/server
-COPY tool/credit_checker/src/youtubeLink.ts tool/credit_checker/src/uploadLimit.ts ./tool/credit_checker/src/
+COPY tool/credit_checker/src/youtubeLink.ts tool/credit_checker/src/uploadLimit.ts tool/credit_checker/src/batchScan.ts tool/credit_checker/src/channelScan.ts ./tool/credit_checker/src/
 COPY --from=build /app/tool/credit_checker/dist ./tool/credit_checker/dist
 RUN mkdir /data && chown node:node /data
 
@@ -29,7 +36,11 @@ ENV HOST=0.0.0.0 \
     MUSIC_AUDIT_WORKDIR=/data \
     MUSIC_AUDIT_PYTHON=/opt/venv/bin/python \
     FFMPEG_LOCATION=/usr/bin/ffmpeg \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    AUDD_CLI=/opt/venv/bin/audd \
+    AUDD_CONFIG_DIR=/data/audd/config \
+    AUDD_CACHE_DIR=/data/audd/cache \
+    AUDD_DATA_DIR=/data/audd/data
 
 USER node
 WORKDIR /app/tool/credit_checker

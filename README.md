@@ -102,6 +102,76 @@ Lệnh in JSON gồm `status`, `decision`, `note` và danh sách bài trong `tra
 
 Agent trong Claude Code tự dùng lệnh này qua skill `identify-music` khi mở repo ở folder này.
 
+## Quét cả kênh
+
+Chọn dịch vụ cho `submit` bằng `MUSIC_SERVICE` trong `.env` (`audd` hoặc `acrcloud`). Để trống thì theo khóa đang có, giống lệnh `identify`.
+Với AudD, `submit` quét và lưu kết quả ngay, không cần `create-container` hay `fetch`.
+
+**1. Lấy danh sách video** (cần `YOUTUBE_API_KEY`). Mặc định lấy cả Shorts, thêm `--skip-shorts` để bỏ qua:
+
+```bash
+python audit.py list-videos --channel https://www.youtube.com/@kenh-a --skip-shorts
+```
+
+**2. Tải âm thanh về máy** (tùy chọn nhưng cần cho bước 3). AudD chỉ cho quét bằng link khi có gói trả phí (lỗi 904), gửi file thì dùng được
+với tài khoản dùng thử. Việc tải từ YouTube có thể vi phạm Điều khoản dịch vụ của YouTube. Cần yt-dlp (`winget install yt-dlp.yt-dlp`):
+
+```bash
+python audit.py audio-links --all-videos
+```
+
+Rồi chạy `tai_am_thanh.bat`, file nằm ở `data/audio/<video_id>.m4a`. Công cụ không dùng cookie tài khoản kênh: nếu YouTube báo "not a bot" thì dừng lại và chạy tiếp sau vài giờ.
+
+**3. Lọc trước có nhạc hay không** trên máy bằng mô hình YAMNet của Google, không tốn lượt AudD. Cần ffmpeg (trong PATH hoặc `FFMPEG_LOCATION`). Cài một lần:
+
+```bash
+python -m pip install -r requirements-detect.txt
+```
+
+```powershell
+New-Item -ItemType Directory -Force models; Invoke-WebRequest https://storage.googleapis.com/mediapipe-models/audio_classifier/yamnet/float32/latest/yamnet.tflite -OutFile models/yamnet.tflite; Invoke-WebRequest https://raw.githubusercontent.com/tensorflow/models/master/research/audioset/yamnet/yamnet_class_map.csv -OutFile models/yamnet_class_map.csv
+```
+
+```bash
+python audit.py detect-music --all-videos
+```
+
+Chỉ có 2 nhóm: `khong-nhac` và `co-nhac` (phân vân cũng là `co-nhac`). Video có nhạc khi có đoạn liền mạch từ 1,5 giây (điểm nhạc ≥ 0,15) hoặc tổng từ 5 giây.
+8 giây đầu và 8 giây cuối là intro, outro của kênh nên không tính (`--intro`, `--outro`; `0` để tính lại). Đổi ngưỡng bằng `--threshold`, `--min-run`, `--min-total`.
+
+**Đo trước khi tin:** ghi cột `has_music` trong `data/testset.csv` cho các video đã nghe chắc, lệnh sẽ in số video **bỏ sót**.
+
+**4. Gửi đi nhận diện.** Thử 1 video trước. Lệnh in số lượt AudD ước tính trước khi gửi:
+
+```bash
+python audit.py submit --all-videos --music-only --limit 1
+```
+
+```bash
+python audit.py submit --all-videos --music-only
+```
+
+- `--music-only` bỏ cả video `khong-nhac` lẫn video chưa lọc. Video bị bỏ qua vẫn có trong báo cáo và không bao giờ được xếp `sach`.
+- Không tự gửi lại khi lỗi, vì mỗi lần gửi đều tính phí. Chạy lại lệnh để gửi tiếp, video đã quét không bị quét lại. Gặp lỗi tài khoản AudD (900, 901, 904) thì dừng ngay.
+- Vẫn áp dụng giới hạn `AUDD_MAX_CHUNKS` (mặc định 1 giờ đầu mỗi video). Lệnh cảnh báo khi có video dài hơn; tăng giá trị này nếu cần quét hết.
+- `--clips N` gửi đoạn 12 giây rải đều mỗi 45 giây ở chỗ có nhạc, tối đa N đoạn mỗi video, mỗi đoạn 1 lượt. Nhạc lọt giữa hai đoạn có thể bị sót. Chạy `compare-clips` để so với kết quả quét cả video.
+
+**5. Xuất báo cáo:**
+
+```bash
+python audit.py export --all-videos
+```
+
+| File | Nội dung |
+|---|---|
+| `out/bao-cao-quet.csv` | Mỗi video một dòng: nhóm (`sach`, `co-nhac`, `can-nghe-lai`), lý do, kết quả máy lọc, Policy; mỗi bài một nhóm ô (Bài, Tác giả, Hãng, Library, Vị trí) |
+| `out/songs.csv` | Mỗi bài đã nhận ra một dòng (bỏ trùng), số video có bài, cột `library` |
+
+Với AudD, nhóm `sach` luôn rỗng vì AudD không báo "không có nhạc". `resources/audio_library.csv` chỉ xác nhận bài có trong Library: không thấy thì vẫn là `chua-tra`.
+Cột `library`, `policy` còn đọc từ `out/library_cache.json`, `out/studio_policy.json` nếu có; phần tra Studio tạo ra hai file này chưa được làm.
+
+**Trạng thái:** luồng này mới kiểm bằng máy chủ AudD giả. Chưa chạy với tài khoản thật, mô hình YAMNet thật, ffmpeg hay yt-dlp thật.
+
 ## Các cột trong testset.csv
 
 | Cột | Nội dung |
@@ -109,6 +179,7 @@ Agent trong Claude Code tự dùng lệnh này qua skill `identify-music` khi m�
 | `source` | Link YouTube công khai, hoặc đường dẫn file trên máy (video hoặc nhạc) |
 | `group` | Một trong các nhóm ở bảng dưới |
 | `music_origin` | `vn`, `foreign`, `none`, hoặc để trống |
+| `has_music` | Video có nhạc không, dùng để đo máy lọc: `yes`, `no`, hoặc để trống |
 | `has_speech` | Video có lời nói không: `yes` hoặc `no` |
 | `expected_title` | Tên bài đội biết chắc có trong video. Bắt buộc với nhóm `licensed` |
 | `expected_artist` | Tên nghệ sĩ, nhiều người thì ngăn bằng `,` `;` `&` hoặc `/`. Bắt buộc với nhóm `licensed` |
@@ -158,5 +229,9 @@ Máy chủ giả trong `tests/test_flow.py` mô phỏng API theo tài liệu. Kh
 | `music_audit/acrcloud.py` | Gọi File Scanning API |
 | `music_audit/audd.py` | Gọi Enterprise API của AudD và đọc kết quả |
 | `music_audit/youtube.py` | Lấy danh sách video qua YouTube Data API |
+| `music_audit/detect.py` | Lọc trước có nhạc hay không bằng YAMNet, chọn đoạn cắt |
+| `music_audit/grouping.py` | Gom theo bài, báo cáo mỗi video một dòng |
+| `tai_am_thanh.bat` | Tải âm thanh từ `data/audio/links.txt` bằng yt-dlp |
+| `resources/audio_library.csv` | Danh sách bài đã biết có trong Audio Library |
 | `music_audit/evaluate.py` | Đọc kết quả, quyết định của cổng kiểm tra, báo cáo |
 | `music_audit/common.py` | Đọc `.env`, CSV và kiểm tra danh sách video |

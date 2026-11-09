@@ -5,6 +5,9 @@
 data/
 out/
 
+# Mô hình YAMNet tải về từ Google (xem README), không đưa vào git
+models/
+
 __pycache__/
 *.pyc
 .DS_Store

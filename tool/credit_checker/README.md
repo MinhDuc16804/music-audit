@@ -21,7 +21,7 @@ Mỗi đoạn 12 giây AudD có thể trả nhiều bài ứng viên, và có th
 phát thật** khi có hai lần khớp liên tiếp mà vị trí trong bài tiến đúng theo thời gian trong video, lệch tối đa 2 giây. Bài ngoài thư
 viện không có bằng chứng được bỏ qua nếu mọi đoạn của nó đều có bài trong thư viện có bằng chứng, app hiện nhãn "Có thể nhận nhầm". Vì
 thế một đoạn nhạc thương mại chỉ khớp một lần có thể không bị chặn cứng. Luật này mới đo trên 6 lần quét. Độ dài file do trình duyệt đọc, nên không cần
-`ffmpeg`. Độ dài video khi quét bằng link lấy ngay lúc tách mp3. Mức 80% là giá trị ban đầu, chưa đo trên dữ liệu thật. App vẫn có tab Quy trình & Pháp lý và Nguồn nhạc để tham khảo.
+`ffmpeg`. Độ dài video khi quét bằng link lấy ngay lúc tách mp3. Mức 80% là giá trị ban đầu, chưa đo trên dữ liệu thật. App vẫn có tab Nguồn nhạc để tham khảo.
 
 App không phải tư vấn pháp lý.
 
@@ -65,7 +65,7 @@ nên app giới hạn file tải lên ở 95 MB. File lớn hơn thì xuất ri�
 
 Trên VPS, dữ liệu quét trong `out/` nằm ở nhà cung cấp ngoài công ty, và YouTube dễ chặn IP máy chủ hơn, nên quét bằng link có thể không chạy.
 
-Mỗi người có `MAX_SCANS_PER_USER_PER_DAY` lượt quét mỗi ngày, mặc định 30, tính cả lượt lấy lại kết quả cũ. Bộ đếm về 0 khi khởi động lại app.
+Mỗi người có `MAX_SCANS_PER_USER_PER_DAY` lượt quét mỗi ngày, mặc định 30. Màn hình quét một video tính cả lượt lấy lại kết quả cũ, còn quét hàng loạt thì không. Bộ đếm về 0 khi khởi động lại app.
 Mỗi lượt được ghi vào `out/usage.jsonl` gồm thời gian, email, video hoặc tên file và kết quả. Email lấy từ header của Cloudflare Access,
 nên không có Access thì mọi người dùng chung một bộ đếm, tên là `khong-ro`.
 
@@ -81,6 +81,40 @@ Các việc thường gặp:
 Kết quả quét nằm trong volume `music-audit-data`, cập nhật app không làm mất. Thêm `-v` vào lệnh `down` sẽ **xóa** volume này, và các video
 đã quét sẽ tốn lượt AudD nếu quét lại. Danh sách `public/audio-library.json` được đóng cùng image, nên sau khi cập nhật danh sách cần
 build lại.
+
+## Quét hàng loạt
+
+Mục Quét hàng loạt nhận tối đa 20 link video mỗi lô, sửa ở `MAX_BATCH_VIDEOS` trong `src/batchScan.ts`. Mỗi video được kết luận theo đúng luật của màn hình một video.
+
+- Lô chạy nền trên server, đóng tab vẫn tiếp tục. Trạng thái lưu ở `out/batches.json`, app khởi động lại thì quét tiếp.
+- Mỗi người chỉ có một lô chưa xong tại một thời điểm. Server quét từng video một, xen kẽ với màn hình một video, nghỉ 5 giây giữa hai video phải tải về.
+- Lượt được giữ ngay khi tạo lô, mỗi video một lượt. Video đã có kết quả không tốn lượt. Hủy lô thì hoàn lượt phần chưa quét, quét lại video lỗi không tính thêm.
+- Số yêu cầu AudD ước tính lấy độ dài qua YouTube Data API. Thiếu `YOUTUBE_API_KEY` thì app hiện mức tối đa.
+- YouTube chặn tải thì lô tạm dừng và giữ các video chưa quét, bấm Chạy tiếp để thử lại.
+
+## Quét cả kênh
+
+Mục Quét cả kênh nhận link kênh có @handle hoặc mã UC…, cần `YOUTUBE_API_KEY` để lấy danh sách video. Các bước: lấy danh sách, tải âm thanh, lọc nhạc nếu chọn, xác nhận chi phí, nhận diện, báo cáo.
+
+- App luôn dừng hỏi trước khi gửi AudD, kèm số video và số yêu cầu chính xác. Tải âm thanh và lọc nhạc không tốn lượt.
+- Mỗi lần quét không dùng `MAX_SCANS_PER_USER_PER_DAY` mà dùng trần `MAX_CHANNEL_SCAN_REQUESTS`, mặc định 5000 yêu cầu. Vượt trần thì không gửi được. Người bấm xác nhận và số yêu cầu được ghi vào `out/usage.jsonl`.
+- Toàn máy chủ chỉ chạy một kênh một lúc, mỗi người chỉ có một lần quét dở. Đóng tab vẫn tiếp tục. App khởi động lại thì lần quét tạm dừng, phải bấm Chạy tiếp vì việc gửi AudD có tính phí.
+- Mỗi kênh có thư mục riêng `out/channels/<kênh>/`, dùng lại giữa các lần quét nên video đã quét không tốn lượt. Tùy chọn của lần sau không áp dụng cho video đã quét ở lần trước. File âm thanh bị xóa khi lần quét kết thúc.
+- YouTube chặn tải hoặc AudD báo lỗi tài khoản thì lần quét tạm dừng. Video lỗi riêng lẻ được bỏ qua và nằm ở nhóm Cần nghe lại.
+- Lọc nhạc cần `requirements-detect.txt` và mô hình trong `models/`, xem README của `music-audit`. Thư viện này chưa có bản cho Python 3.15 và cần Windows cho phép nạp file DLL của nó. Thiếu công cụ thì tab báo tên thứ còn thiếu và khóa nút quét. Quét link cần `yt-dlp`.
+- Với AudD, nhóm Sạch luôn trống. Kết quả máy lọc không bao giờ đưa video vào nhóm này.
+
+**Trạng thái:** luồng này mới kiểm bằng lệnh giả, chưa chạy với YouTube, AudD, yt-dlp hay YAMNet thật. Hãy thử 1 video trước.
+
+## Theo dõi hạn mức
+
+Tab này hiện gói AudD, tổng số yêu cầu, số đã dùng và số còn lại. API của AudD không trả các số này, nên server đọc qua công cụ `audd` có sẵn trong image Docker. Cần đăng nhập tài khoản AudD một lần:
+
+```bash
+docker compose exec music-audit /opt/venv/bin/audd login --device
+```
+
+Mở trang và nhập mã mà lệnh in ra, chỉ cần giữ quyền đọc tài khoản và số liệu sử dụng. Phiên đăng nhập nằm trong volume `music-audit-data`, cập nhật app không làm mất. Số liệu được lưu tạm một phút. Công cụ lỗi hoặc chưa đăng nhập thì tab báo không có số liệu, việc quét không bị ảnh hưởng.
 
 ## Kiểm tra nhạc
 

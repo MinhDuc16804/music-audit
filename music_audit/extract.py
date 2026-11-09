@@ -15,17 +15,23 @@ TIMEOUT_SECONDS = 600
 MAX_FILESIZE = "500M"
 MP3_QUALITY = "5"
 BOT_CHECK_TEXT = "not a bot"
+BLOCKED_MESSAGE = "YouTube đang chặn máy này tải video. Hãy thử lại sau hoặc tải file lên."
+MISSING_YT_DLP_MESSAGE = "Chưa cài yt-dlp. Hãy chạy: python -m pip install --user \"yt-dlp[default]\""
 MESSAGES = (
     ("private video", "Video đang ở chế độ riêng tư, không tách được âm thanh."),
     ("unavailable", "Video không tồn tại hoặc đã bị gỡ."),
     ("confirm your age", "Video giới hạn độ tuổi, không tách được âm thanh."),
-    (BOT_CHECK_TEXT, "YouTube đang chặn máy này tải video. Hãy thử lại sau hoặc tải file lên."),
+    (BOT_CHECK_TEXT, BLOCKED_MESSAGE),
 )
 DEFAULT_MESSAGE = "Không tách được âm thanh từ video này. Video phải đang công khai và không phát trực tiếp."
 
 
 class ExtractError(Exception):
     """Lỗi khi tách âm thanh, đã là câu dễ hiểu cho người dùng."""
+
+
+class ExtractStop(ExtractError):
+    """Lỗi làm mọi video sau cũng hỏng theo (YouTube chặn, thiếu yt-dlp), nên phải dừng cả lượt tải."""
 
 
 @dataclass
@@ -85,9 +91,48 @@ def friendly_message(stderr):
     return next((message for key, message in MESSAGES if key in text), DEFAULT_MESSAGE)
 
 
+def build_download_command(url, folder):
+    """Tải âm thanh m4a về thư mục, đặt tên theo mã video, giống tai_am_thanh.bat. Không đọc cấu hình của máy, không cookie."""
+    return [
+        sys.executable, "-m", "yt_dlp",
+        "--ignore-config",
+        "--no-playlist",
+        "--no-warnings",
+        "--no-progress",
+        "--js-runtimes", "node",
+        "--format", "bestaudio[ext=m4a]",
+        "--max-filesize", MAX_FILESIZE,
+        "--match-filters", "!is_live",
+        "--no-overwrites",
+        "--output", str(Path(folder) / "%(id)s.%(ext)s"),
+        "--",
+        url,
+    ]
+
+
+def download_audio(url, folder):
+    """Tải âm thanh một video vào thư mục để lọc nhạc và gửi file cho AudD."""
+    if importlib.util.find_spec("yt_dlp") is None:
+        raise ExtractStop(MISSING_YT_DLP_MESSAGE)
+    try:
+        done = subprocess.run(
+            build_download_command(url, folder),
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=TIMEOUT_SECONDS,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        raise ExtractError("Tải âm thanh quá lâu nên đã bỏ qua video này.") from None
+    if done.returncode != 0:
+        message = friendly_message(done.stderr)
+        raise (ExtractStop if message == BLOCKED_MESSAGE else ExtractError)(message)
+
+
 def extract_audio(url, folder, max_seconds):
     if importlib.util.find_spec("yt_dlp") is None:
-        raise ExtractError("Chưa cài yt-dlp. Hãy chạy: python -m pip install --user \"yt-dlp[default]\"")
+        raise ExtractError(MISSING_YT_DLP_MESSAGE)
     ffmpeg = find_ffmpeg()
     if not ffmpeg:
         raise ExtractError("Chưa có ffmpeg. Hãy cài ffmpeg hoặc điền FFMPEG_LOCATION trong file .env.")

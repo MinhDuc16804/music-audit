@@ -45,6 +45,30 @@ describe('createDailyLimiter', () => {
   it('giới hạn 0 là chặn hết', () => {
     expect(createDailyLimiter(0, () => '2026-11-07')('a')).toBe(false);
   });
+
+  it('giữ nhiều lượt một lần, không đủ thì không tính lượt nào', () => {
+    const take = createDailyLimiter(5, () => '2026-11-07');
+    expect(take('a', 4)).toBe(true);
+    expect(take('a', 2)).toBe(false);
+    expect(take.remaining('a')).toBe(1);
+  });
+
+  it('hoàn lại lượt không dùng đến', () => {
+    const take = createDailyLimiter(5, () => '2026-11-07');
+    take('a', 4);
+    take.release('a', 3);
+    expect(take.remaining('a')).toBe(4);
+    take.release('a', 10);
+    expect(take.remaining('a')).toBe(5);
+  });
+
+  it('sang ngày mới thì số lượt còn lại đầy trở lại', () => {
+    let today = '2026-11-07';
+    const take = createDailyLimiter(5, () => today);
+    take('a', 5);
+    today = '2026-11-08';
+    expect(take.remaining('a')).toBe(5);
+  });
 });
 
 describe('appendUsage', () => {
