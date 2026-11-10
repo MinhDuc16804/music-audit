@@ -118,6 +118,40 @@ class ChannelReportCommandTests(ChannelCommandTestCase):
         self.assertEqual([song["title"] for song in report["songs"]], ["Bài Thử"])
 
 
+class HistoryCommandTests(ChannelCommandTestCase):
+    RAW = {"status": "success", "result": [{"offset": "00:12", "songs": [{"title": "Bài Cũ", "artist": "Ca Sĩ", "timecode": "00:30", "score": 100}]}],
+           "duration_seconds": 75}
+
+    def setUp(self):
+        super().setUp()
+        audit.write_json(self.paths.audd / f"{A}.json", self.RAW)
+        audit.write_json(self.paths.audd / f"file-{'0123456789abcdef' * 4}.json", self.RAW)
+
+    def test_reads_saved_results_without_calling_audd(self):
+        with mock.patch("audit.audd_client") as client, mock.patch.dict(os.environ, {"YOUTUBE_API_KEY": ""}):
+            result = json.loads(self.run_command("history", A, "0123456789a", B))
+        client.assert_not_called()
+        self.assertEqual(set(result), {A, "0123456789a"})
+        self.assertEqual(result[A]["url"], url(A))
+        self.assertEqual(result[A]["status"], "done")
+        self.assertEqual(result[A]["duration_seconds"], 75)
+        self.assertEqual(result[A]["tracks"][0]["title"], "Bài Cũ")
+        self.assertEqual(result["0123456789a"]["url"], "")
+
+    def test_ignores_keys_that_could_leave_the_folder(self):
+        with mock.patch.dict(os.environ, {"YOUTUBE_API_KEY": ""}):
+            self.assertEqual(json.loads(self.run_command("history", "../../.env", "*")), {})
+
+    def test_titles_are_fetched_once_and_cached(self):
+        client = mock.Mock()
+        client.video_titles.return_value = {A: "Tên Video"}
+        with mock.patch.dict(os.environ, {"YOUTUBE_API_KEY": "k"}), mock.patch("audit.YoutubeClient", return_value=client):
+            first = json.loads(self.run_command("history", A))
+            second = json.loads(self.run_command("history", A))
+        self.assertEqual((first[A]["title"], second[A]["title"]), ("Tên Video", "Tên Video"))
+        client.video_titles.assert_called_once_with([A])
+
+
 class ChannelStatusTests(ChannelCommandTestCase):
     def test_reports_each_video(self):
         self.add_audio(A)

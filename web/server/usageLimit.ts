@@ -17,6 +17,8 @@ export interface UsageEntry {
   kind: 'link' | 'file' | 'batch' | 'channel';
   target: string;
   outcome: 'done' | 'error' | 'limited';
+  /** Mã tìm lại kết quả đã lưu, dùng cho file tải lên vì tên file không đủ để tìm. */
+  resultId?: string;
 }
 
 export function getUserEmail(headers: Record<string, string | string[] | undefined>): string {
