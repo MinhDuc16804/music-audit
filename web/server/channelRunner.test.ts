@@ -38,6 +38,9 @@ function setup(overrides: Partial<ChannelRunnerDeps> = {}) {
     removeAudio: vi.fn(async () => undefined),
     logUsage: vi.fn(async () => undefined),
     maxRequests: 5000,
+    reserveRequests: vi.fn((_user: string, _count: number) => true),
+    releaseRequests: vi.fn((_user: string, _count: number) => undefined),
+    remainingRequests: vi.fn((_user: string) => 5000),
   };
   const deps = { ...fakes, ...overrides } as typeof fakes;
   return { deps, runner: createChannelRunner(deps) };
@@ -129,8 +132,8 @@ describe('createChannelRunner', () => {
     const scan = await startedAtGate(runner);
     await runner.send(USER, scan.id);
     const done = await waitForStatus(runner, 'done');
-    expect(deps.runQueued.mock.calls.map(([, args]) => args[3])).toEqual(['a', 'b']);
-    expect(deps.runQueued.mock.calls[0][1]).toEqual(['submit', '--all-videos', '--video-id', 'a', '--delay', '0']);
+    expect(deps.runQueued.mock.calls.map(([, args]) => args[2])).toEqual(['--video-id=a', '--video-id=b']);
+    expect(deps.runQueued.mock.calls[0][1]).toEqual(['submit', '--all-videos', '--video-id=a', '--delay', '0']);
     expect(deps.logUsage).toHaveBeenCalledWith(USER, `${CHANNEL.url} (2 video, 10 yêu cầu)`, 'done', done.id);
     expect(deps.removeAudio).toHaveBeenCalledTimes(1);
     expect(done.stoppedEarly).toBe(false);
@@ -181,7 +184,7 @@ describe('createChannelRunner', () => {
     expect(runQueued).toHaveBeenCalledTimes(1);
     await runner.resume(USER, scan.id);
     await waitForStatus(runner, 'done');
-    expect(runQueued.mock.calls.map(([, args]) => args[3])).toEqual(['a', 'a', 'b']);
+    expect(runQueued.mock.calls.map(([, args]) => args[2])).toEqual(['--video-id=a', '--video-id=a', '--video-id=b']);
   });
 
   it('YouTube chặn thì tạm dừng, chạy tiếp thì tải lại', async () => {
@@ -277,6 +280,73 @@ describe('createChannelRunner', () => {
     await waitForStatus(runner, 'done');
     expect((await runner.history()).map(({ id }) => id)).toEqual([second.id, first.id]);
     await runner.report(first.id);
+  });
+
+  it('bấm Gửi hai lần liền thì lần thứ hai bị từ chối, chỉ chạy một lượt', async () => {
+    const { deps, runner } = setup();
+    const scan = await startedAtGate(runner);
+    const results = await Promise.allSettled([runner.send(USER, scan.id), runner.send(USER, scan.id)]);
+    expect(results.map(({ status }) => status).sort()).toEqual(['fulfilled', 'rejected']);
+    expect(results.find((result) => result.status === 'rejected')).toMatchObject({ reason: { status: 409 } });
+    await waitForStatus(runner, 'done');
+    expect(deps.logUsage).toHaveBeenCalledTimes(1);
+    expect(deps.runQueued).toHaveBeenCalledTimes(2);
+  });
+
+  it('mã video bắt đầu bằng dấu gạch ngang được truyền liền với --video-id=', async () => {
+    const readJson = vi.fn(async () => ({ channel: 'Kênh', maxSeconds: 3600, videos: [video('-abcdefghij')] }));
+    const { deps, runner } = setup({ readJson });
+    const scan = await startedAtGate(runner, NO_FILTER);
+    await runner.send(USER, scan.id);
+    await waitForStatus(runner, 'done');
+    expect(deps.runQueued.mock.calls[0][1]).toContain('--video-id=-abcdefghij');
+  });
+
+  it('video lỗi một lần thì tạm dừng, chạy tiếp mà vẫn lỗi thì bỏ qua video đó và quét tiếp', async () => {
+    const runQueued = vi.fn(async (_workdir: string, args: string[]) => {
+      if (args.includes('--video-id=a')) {
+        throw new Error('Lệnh quét không chạy xong.');
+      }
+      return 'Đã quét 1/1 video.';
+    });
+    const { runner } = setup({ runQueued });
+    const scan = await startedAtGate(runner);
+    await runner.send(USER, scan.id);
+    const paused = await waitForStatus(runner, 'paused');
+    expect(paused.pauseReason).toContain('nếu vẫn lỗi app sẽ bỏ qua video này');
+    await runner.resume(USER, scan.id);
+    const done = await waitForStatus(runner, 'done');
+    expect(done.failed).toBe(1);
+    expect(runQueued.mock.calls.map(([, args]) => args[2])).toEqual(['--video-id=a', '--video-id=a', '--video-id=b']);
+  });
+
+  it('vượt hạn mức quét kênh trong ngày thì không gửi gì', async () => {
+    const { deps, runner } = setup({ reserveRequests: vi.fn(() => false), remainingRequests: vi.fn(() => 3) });
+    const scan = await startedAtGate(runner);
+    await expect(runner.send(USER, scan.id)).rejects.toMatchObject({ status: 429, message: expect.stringContaining('chỉ còn 3') });
+    expect((await runner.current(USER)).scan?.status).toBe('awaiting');
+    expect(deps.runQueued).not.toHaveBeenCalled();
+    expect(deps.logUsage).not.toHaveBeenCalled();
+  });
+
+  it('giữ hạn mức khi gửi, dừng giữa chừng thì hoàn lại phần chưa gửi', async () => {
+    let release: (value: string) => void = () => undefined;
+    const runQueued = vi.fn(() => new Promise<string>((resolveRun) => (release = resolveRun)));
+    const { deps, runner } = setup({ runQueued });
+    const scan = await startedAtGate(runner);
+    await runner.send(USER, scan.id);
+    expect(deps.reserveRequests).toHaveBeenCalledWith(USER, 10);
+    await runner.stop(USER, scan.id);
+    release('Đã quét 1/1 video.');
+    await waitForStatus(runner, 'done');
+    expect(deps.releaseRequests).toHaveBeenCalledWith(USER, 10);
+  });
+
+  it('dừng trước khi gửi thì không hoàn gì vì chưa giữ', async () => {
+    const { deps, runner } = setup();
+    const scan = await startedAtGate(runner);
+    await runner.stop(USER, scan.id);
+    expect(deps.releaseRequests).not.toHaveBeenCalled();
   });
 
   it('người khác không thấy và không điều khiển được lần quét', async () => {

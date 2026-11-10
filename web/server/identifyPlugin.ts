@@ -25,6 +25,7 @@ import type { ChannelHistoryResponse } from '../src/channelScan.ts';
 import { BATCH_ROUTE, BatchError, createBatchRunner, matchBatchRoute, parseBatchVideoIds } from './batchRunner.ts';
 import { CHANNEL_ROUTE, ChannelError, createChannelRunner, matchChannelRoute, parseMaxRequests } from './channelRunner.ts';
 import { HISTORY_ROUTE, readHistory } from './history.ts';
+import { createAccessGuard, parseAccessConfig } from './accessAuth.ts';
 import { AuddCommandError, createQuotaReader, QUOTA_ROUTE } from './quota.ts';
 import type { ScanJobStarted, ScanJobView } from '../src/scanJob.ts';
 import { createScanJobs, JOB_ROUTE, parseJobId } from './scanJobs.ts';
@@ -244,7 +245,8 @@ export function createHandlers(getAuditRoot: () => string) {
     }
     const entries = await readHistory({
       readLog: () => readFile(join(getOutFolder(), 'usage.jsonl'), 'utf8').catch(() => ''),
-      readResults: async (keys) => (await runAudit(getAuditRoot(), ['history', ...keys])) as Record<string, HistoryResult>,
+      // "--" để mã bắt đầu bằng "-" không bị Python hiểu nhầm là tùy chọn.
+      readResults: async (keys) => (await runAudit(getAuditRoot(), ['history', '--', ...keys])) as Record<string, HistoryResult>,
     });
     sendJson(response, 200, { entries, user: getUserEmail(request.headers) } satisfies HistoryResponse);
   };
@@ -262,6 +264,8 @@ export function createHandlers(getAuditRoot: () => string) {
   });
 
   const maxChannelRequests = parseMaxRequests(process.env.MAX_CHANNEL_SCAN_REQUESTS);
+  // Quét cả kênh không dùng lượt quét thường mà có hạn mức yêu cầu AudD riêng cho mỗi người mỗi ngày.
+  const channelBudget = createDailyLimiter(parseMaxRequests(process.env.MAX_CHANNEL_REQUESTS_PER_USER_PER_DAY));
   const quotaReader = createQuotaReader({ run: runAuddCommand });
 
   const handleQuota = async (request: IncomingMessage, response: ServerResponse) => {
@@ -277,6 +281,8 @@ export function createHandlers(getAuditRoot: () => string) {
       remainingScans: allowScan.remaining(user),
       dailyLimit: allowScan.maxPerDay,
       maxChannelRequests,
+      remainingChannelRequests: channelBudget.remaining(user),
+      dailyChannelRequests: channelBudget.maxPerDay,
     } satisfies QuotaResponse);
   };
 
@@ -300,6 +306,9 @@ export function createHandlers(getAuditRoot: () => string) {
     removeAudio: (workdir) => rm(join(workdir, 'data', 'audio'), { recursive: true, force: true }),
     logUsage: (user, target, outcome, scanId) => logUsage(user, 'channel', target, outcome, scanId),
     maxRequests: maxChannelRequests,
+    reserveRequests: channelBudget,
+    releaseRequests: channelBudget.release,
+    remainingRequests: channelBudget.remaining,
   });
 
   const handleChannel = async (request: IncomingMessage, response: ServerResponse) => {
@@ -356,7 +365,7 @@ export function createHandlers(getAuditRoot: () => string) {
   /** Không qua hàng đợi vì chỉ đọc độ dài video, không nên phải chờ các lượt quét đang chạy. */
   const estimateBatch = async (videoIds: string[]): Promise<BatchEstimateResponse> => {
     const pending = videoIds.filter((videoId) => !isCached(videoId));
-    const info = (pending.length ? await runAudit(getAuditRoot(), ['durations', ...pending]).catch(() => null) : null) as
+    const info = (pending.length ? await runAudit(getAuditRoot(), ['durations', '--', ...pending]).catch(() => null) : null) as
       | { max_seconds?: number; videos?: Record<string, number> }
       | null;
     return {
@@ -505,6 +514,13 @@ export function createHandlers(getAuditRoot: () => string) {
       return;
     }
 
+    // File quá lớn thì báo ngay theo độ dài khai trong header, trước khi tính lượt và trước khi nhận file.
+    if (Number(request.headers['content-length'] ?? 0) > MAX_UPLOAD_BYTES) {
+      request.resume();
+      sendJson(response, 413, { error: UPLOAD_TOO_LARGE_MESSAGE });
+      return;
+    }
+
     const user = getUserEmail(request.headers);
     if (!(await checkLimit(response, user, 'file', fileName))) {
       request.resume();
@@ -530,7 +546,29 @@ export function createHandlers(getAuditRoot: () => string) {
     sendJson(response, 202, { jobId } satisfies ScanJobStarted);
   };
 
-  return { handleLink, handleFile, handleJob, handleBatch, handleChannel, handleQuota, handleHistory, startBatches: batchRunner.start };
+  // Bật CF_ACCESS_TEAM_DOMAIN và CF_ACCESS_AUD thì mọi đường dẫn quét đều phải có token Cloudflare Access hợp lệ.
+  const allowAccess = createAccessGuard(parseAccessConfig(process.env.CF_ACCESS_TEAM_DOMAIN, process.env.CF_ACCESS_AUD));
+  const guard =
+    (handler: (request: IncomingMessage, response: ServerResponse) => unknown) =>
+    async (request: IncomingMessage, response: ServerResponse) => {
+      if (!(await allowAccess(request))) {
+        request.resume();
+        sendJson(response, 401, { error: 'Chưa đăng nhập qua Cloudflare Access hoặc phiên đã hết hạn. Hãy tải lại trang.' });
+        return;
+      }
+      await handler(request, response);
+    };
+
+  return {
+    handleLink: guard(handleLink),
+    handleFile: guard(handleFile),
+    handleJob: guard(handleJob),
+    handleBatch: guard(handleBatch),
+    handleChannel: guard(handleChannel),
+    handleQuota: guard(handleQuota),
+    handleHistory: guard(handleHistory),
+    startBatches: batchRunner.start,
+  };
 }
 
 export function identifyPlugin(): Plugin {

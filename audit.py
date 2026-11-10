@@ -386,18 +386,29 @@ def _shift_offset(offset, seconds):
     return detect.mmss(minutes * 60 + secs + seconds)
 
 
+def _clip_cache(paths, audio, start):
+    """Kết quả AudD của một đoạn, lưu ngay khi có để lỗi giữa chừng không làm mất và không trả tiền lại đoạn đã gửi."""
+    return paths.out / "clips" / audio.stem / f"{start:.2f}.json"
+
+
 def _recognize_clips(client, paths, source, max_clips):
     """Gửi AudD các đoạn ~12 giây rải đều ở chỗ có nhạc (mỗi đoạn 1 lượt) thay vì cả video.
 
     Ghép kết quả thành một phản hồi AudD bình thường; offset của từng đoạn đổi về giây trong video.
+    Đoạn đã có kết quả từ lần chạy trước được dùng lại, chỉ gửi các đoạn chưa có.
     """
     audio, cached = _detect_cache(paths, source)
     starts = detect.clip_starts(cached["music"], max_clips=max_clips)
     result = []
     with tempfile.TemporaryDirectory() as folder:
         for number, start in enumerate(starts):
-            clip = detect.cut_clip(audio, start, Path(folder) / f"clip{number}.mp3")
-            for offset, songs in _iter_chunks(client.recognize_file(clip, 1, full_scan=True)):
+            saved = _clip_cache(paths, audio, start)
+            response = read_json(saved, None)
+            if response is None:
+                clip = detect.cut_clip(audio, start, Path(folder) / f"clip{number}.mp3")
+                response = client.recognize_file(clip, 1, full_scan=True)
+                write_json(saved, response)
+            for offset, songs in _iter_chunks(response):
                 result.append({"offset": _shift_offset(offset or "00:00", start), "songs": songs})
     return {"status": "success", "result": result}, starts
 
@@ -976,6 +987,17 @@ def cmd_export(args, paths):
     )
 
 
+def clip_count(value):
+    """Số đoạn mỗi video có trần, để gõ nhầm một số lớn không thành hóa đơn lớn."""
+    try:
+        count = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("phải là số nguyên") from None
+    if not 0 <= count <= detect.MAX_CLIPS:
+        raise argparse.ArgumentTypeError(f"phải từ 0 tới {detect.MAX_CLIPS}")
+    return count
+
+
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workdir", default=str(ROOT), help="Thư mục chứa data/ và out/")
@@ -1005,7 +1027,7 @@ def build_parser():
     command.set_defaults(handler=cmd_channel_check)
 
     command = commands.add_parser("channel-status", help="In tình trạng từng video của kênh dạng JSON")
-    command.add_argument("--clips", type=int, default=0, help="Tính thêm số đoạn sẽ gửi nếu dùng submit --clips N")
+    command.add_argument("--clips", type=clip_count, default=0, help="Tính thêm số đoạn sẽ gửi nếu dùng submit --clips N")
     command.set_defaults(handler=cmd_channel_status)
 
     command = commands.add_parser("channel-report", help="In báo cáo cả kênh dạng JSON")
@@ -1041,13 +1063,13 @@ def build_parser():
     command.add_argument("--all-videos", action="store_true", help=all_videos_help)
     command.add_argument("--music-only", "--skip-no-music", dest="music_only", action="store_true",
                          help="Chỉ gửi video detect-music xếp là có nhạc (bỏ video không nhạc và video chưa lọc)")
-    command.add_argument("--clips", type=int, default=0,
-                         help="Chỉ AudD: gửi đoạn 12 giây rải đều mỗi 45 giây ở chỗ có nhạc, tối đa N đoạn mỗi video; 0 là gửi cả video")
+    command.add_argument("--clips", type=clip_count, default=0,
+                         help=f"Chỉ AudD: gửi đoạn 12 giây rải đều mỗi 45 giây ở chỗ có nhạc, tối đa N đoạn mỗi video (N từ 1 tới {detect.MAX_CLIPS}); 0 là gửi cả video")
     command.add_argument("--video-id", default="", help="Chỉ gửi đúng video này, web app dùng để dừng được giữa hai video")
     command.set_defaults(handler=cmd_submit)
 
     command = commands.add_parser("compare-clips", help="Kiểm chứng gửi đoạn 12 giây: so với kết quả quét cả video")
-    command.add_argument("--clips", type=int, default=detect.MAX_CLIPS, help="Tối đa N đoạn mỗi video")
+    command.add_argument("--clips", type=clip_count, default=detect.MAX_CLIPS, help="Tối đa N đoạn mỗi video")
     command.add_argument("--limit", type=int, default=0)
     command.add_argument("--delay", type=float, default=0.5)
     command.set_defaults(handler=cmd_compare_clips)

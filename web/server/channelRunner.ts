@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { buildChannelGate, parseProgress, pickToSend } from '../src/channelScan.ts';
+import { buildChannelGate, parseProgress, pickToSend, unsentRequests } from '../src/channelScan.ts';
 import type {
   ChannelCurrentResponse,
   ChannelHistoryItem,
@@ -102,6 +102,10 @@ export interface ChannelRunnerDeps {
   /** scanId được ghi kèm để tab Lịch sử quét mở lại đúng báo cáo. */
   logUsage: (user: string, target: string, outcome: 'done' | 'error', scanId: string) => Promise<void>;
   maxRequests: number;
+  /** Giữ chỗ từng ấy yêu cầu AudD trong hạn mức quét kênh mỗi ngày của người này, trả về false nếu không đủ. */
+  reserveRequests: (user: string, count: number) => boolean;
+  releaseRequests: (user: string, count: number) => void;
+  remainingRequests: (user: string) => number;
 }
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : 'Không chạy được bước này.');
@@ -180,6 +184,10 @@ export function createChannelRunner(deps: ChannelRunnerDeps) {
   };
 
   const finish = async (scan: ChannelScan, stoppedEarly: boolean) => {
+    // Dừng giữa lúc gửi thì hoàn lại hạn mức của các video chưa gửi. Dừng trước khi gửi thì chưa giữ gì.
+    if (stoppedEarly && scan.sent && scan.options) {
+      deps.releaseRequests(scan.user, unsentRequests(scan.videos, scan.pendingIds, scan.options));
+    }
     scan.status = 'done';
     scan.stoppedEarly = stoppedEarly;
     scan.pendingIds = [];
@@ -247,18 +255,33 @@ export function createChannelRunner(deps: ChannelRunnerDeps) {
     const options = scan.options as ChannelOptions;
     const workdir = deps.getWorkdir(scan.channelKey);
     while (scan.status === 'identifying' && scan.pendingIds.length > 0) {
+      const videoId = scan.pendingIds[0];
       let output: string;
       try {
+        // Ghi liền với dấu = vì mã video có thể bắt đầu bằng "-", Python sẽ hiểu nhầm là một tùy chọn.
         output = await deps.runQueued(workdir, [
-          'submit', '--all-videos', '--video-id', scan.pendingIds[0], '--delay', '0',
+          'submit', '--all-videos', `--video-id=${videoId}`, '--delay', '0',
           ...(options.clips ? ['--clips', String(options.clips)] : []),
         ]);
       } catch (error) {
-        if (scan.status === 'identifying') {
-          await pause(scan, errorText(error));
+        if (scan.status !== 'identifying') {
+          return;
         }
-        return;
+        // Lỗi lần đầu thì dừng để người dùng xem. Chạy tiếp mà vẫn lỗi đúng video đó thì bỏ qua nó,
+        // để một video hỏng không làm kẹt cả lần quét. Video bỏ qua nằm ở nhóm Cần nghe lại.
+        if (scan.lastFailedId !== videoId) {
+          scan.lastFailedId = videoId;
+          await pause(scan, `${errorText(error)} Bấm Chạy tiếp để thử lại, nếu vẫn lỗi app sẽ bỏ qua video này.`);
+          return;
+        }
+        delete scan.lastFailedId;
+        scan.failed += 1;
+        scan.pendingIds.shift();
+        scan.progress = { ...scan.progress, done: scan.progress.done + 1 };
+        await persist();
+        continue;
       }
+      delete scan.lastFailedId;
       // Lỗi tài khoản thì video này chưa được quét, giữ lại để lần chạy tiếp gửi đúng nó.
       if (output.includes(ACCOUNT_ERROR_TEXT)) {
         if (scan.status === 'identifying') {
@@ -282,7 +305,7 @@ export function createChannelRunner(deps: ChannelRunnerDeps) {
     async current(user: string, ): Promise<ChannelCurrentResponse> {
       await ready();
       const scan = scans.filter((candidate) => candidate.user === user).at(-1);
-      return { scan: scan ? toView(scan) : null, maxRequests: deps.maxRequests };
+      return { scan: scan ? toView(scan) : null, maxRequests: deps.maxRequests, remainingRequests: deps.remainingRequests(user) };
     },
 
     async create(user: string, channel: { url: string; key: string }, skipShorts: boolean): Promise<void> {
@@ -352,9 +375,16 @@ export function createChannelRunner(deps: ChannelRunnerDeps) {
         throw new ChannelError(409, `Lần quét cần ${scan.gate.requests} yêu cầu AudD, vượt trần ${deps.maxRequests}.`);
       }
       requireIdle();
-      await deps.logUsage(user, `${scan.channelUrl} (${scan.gate.videos} video, ${scan.gate.requests} yêu cầu)`, 'done', scan.id);
-      scan.sent = { videos: scan.gate.videos, requests: scan.gate.requests };
+      if (!deps.reserveRequests(user, scan.gate.requests)) {
+        throw new ChannelError(
+          429,
+          `Lần quét cần ${scan.gate.requests} yêu cầu AudD, nhưng hạn mức quét kênh hôm nay của bạn chỉ còn ${deps.remainingRequests(user)}. Hãy quét ít video hơn hoặc thử lại vào ngày mai.`,
+        );
+      }
+      // Đổi trạng thái ngay, trước mọi lệnh await, để lần bấm thứ hai gặp lỗi 409 thay vì chạy song song.
       scan.status = 'identifying';
+      scan.sent = { videos: scan.gate.videos, requests: scan.gate.requests };
+      await deps.logUsage(user, `${scan.channelUrl} (${scan.gate.videos} video, ${scan.gate.requests} yêu cầu)`, 'done', scan.id);
       scan.progress = { done: 0, total: scan.pendingIds.length };
       await persist();
       void identify(scan);

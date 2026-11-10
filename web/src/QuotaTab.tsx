@@ -146,6 +146,9 @@ export function QuotaTab() {
               {number(data.remainingScans)} / {number(data.dailyLimit)}
             </LimitRow>
             <LimitRow label="Trần mỗi lần quét cả kênh">{number(data.maxChannelRequests)} yêu cầu</LimitRow>
+            <LimitRow label="Yêu cầu quét kênh còn lại hôm nay của bạn">
+              {number(data.remainingChannelRequests)} / {number(data.dailyChannelRequests)}
+            </LimitRow>
           </div>
         </Panel>
       )}

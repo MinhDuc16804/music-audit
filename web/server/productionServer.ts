@@ -62,7 +62,7 @@ const server = createServer((request, response) => {
   } else if (pathname === ROUTE) {
     void handleLink(request, response);
   } else if (pathname.startsWith(`${JOB_ROUTE}/`)) {
-    handleJob(request, response);
+    void handleJob(request, response);
   } else if (pathname === BATCH_ROUTE || pathname.startsWith(`${BATCH_ROUTE}/`)) {
     void handleBatch(request, response);
   } else if (pathname === CHANNEL_ROUTE || pathname.startsWith(`${CHANNEL_ROUTE}/`)) {

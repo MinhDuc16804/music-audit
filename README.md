@@ -1,12 +1,16 @@
 # music-audit
 
-Đo xem dịch vụ nhận diện nhạc (hiện là ACRCloud) bắt được bao nhiêu nhạc trong video của kênh, trước khi quyết định mua.
+Công cụ kiểm tra nhạc trong video YouTube của kênh. Dịch vụ nhận diện đang dùng là **AudD**: web app (thư mục `web/`) và các lệnh
+`identify`, `identify-file`, `submit` đều gọi AudD. ACRCloud vẫn còn trong code cho bài đo ban đầu (phần Cách chạy bên dưới), chỉ dùng
+khi `.env` có `ACRCLOUD_ACCESS_TOKEN` và chọn `MUSIC_SERVICE=acrcloud`.
 Công cụ cũng cho biết tỷ lệ video có nhạc, có lời nói trong một mẫu ngẫu nhiên.
 
 Nguyên tắc: **khớp thì tin, không khớp thì chưa biết.** Video chỉ được cho qua khi không có nhạc hoặc có giấy phép.
 Kết quả quét không phải bằng chứng về bản quyền và không thay thế giấy phép.
 
-**Trạng thái:** mới kiểm bằng máy chủ giả mô phỏng theo tài liệu API, chưa chạy với tài khoản ACRCloud thật.
+**Trạng thái:** kiểm thử tự động dùng máy chủ AudD và ACRCloud giả mô phỏng theo tài liệu API. Đã có một số lần quét AudD thật
+(kết quả trong `out/audd/`), nhưng chưa có bài đo nào trên các video đã biết đáp án, nên chưa biết tỷ lệ bỏ sót thật.
+Chưa chạy với tài khoản ACRCloud thật.
 
 Yêu cầu: Python 3.11 trở lên. Cần `ffmpeg` nếu quét file video trên máy. Không cần cài thêm thư viện Python.
 
@@ -137,7 +141,8 @@ python audit.py detect-music --all-videos
 ```
 
 Chỉ có 2 nhóm: `khong-nhac` và `co-nhac` (phân vân cũng là `co-nhac`). Video có nhạc khi có đoạn liền mạch từ 1,5 giây (điểm nhạc ≥ 0,15) hoặc tổng từ 5 giây.
-8 giây đầu và 8 giây cuối là intro, outro của kênh nên không tính (`--intro`, `--outro`; `0` để tính lại). Đổi ngưỡng bằng `--threshold`, `--min-run`, `--min-total`.
+8 giây đầu và 8 giây cuối là intro, outro của kênh nên không tính (`--intro`, `--outro`; `0` để tính lại). Video ngắn hơn
+khoảng 46 giây (intro, outro và 30 giây thân) được nghe cả video, để Short ngắn toàn nhạc không bị xếp không nhạc. Đổi ngưỡng bằng `--threshold`, `--min-run`, `--min-total`.
 
 **Đo trước khi tin:** ghi cột `has_music` trong `data/testset.csv` cho các video đã nghe chắc, lệnh sẽ in số video **bỏ sót**.
 

@@ -63,6 +63,8 @@ export interface ChannelScan {
   stoppedEarly: boolean;
   /** Số video và số yêu cầu AudD đã được xác nhận gửi, để xem lại trong danh sách các lần quét trước. */
   sent?: { videos: number; requests: number };
+  /** Video vừa làm lệnh gửi lỗi. Lỗi lần nữa khi chạy tiếp thì bỏ qua video này. */
+  lastFailedId?: string;
   videos: ChannelVideo[];
   pendingIds: string[];
 }
@@ -89,6 +91,8 @@ export type ChannelScanView = Omit<ChannelScan, 'videos' | 'pendingIds'> & { vid
 export interface ChannelCurrentResponse {
   scan: ChannelScanView | null;
   maxRequests: number;
+  /** Số yêu cầu AudD người này còn dùng được cho quét cả kênh hôm nay. */
+  remainingRequests: number;
 }
 
 export interface ChannelRequirements {
@@ -205,6 +209,12 @@ export function pickToSend(videos: ChannelVideo[], options: ChannelOptions): Cha
   return pickPrepared(videos, options).filter(
     (video) => !video.scanned && video.hasAudio && (!(options.filter && options.musicOnly) || video.group === 'co-nhac'),
   );
+}
+
+/** Số yêu cầu đã giữ cho các video chưa gửi, để hoàn lại khi dừng giữa chừng. */
+export function unsentRequests(videos: ChannelVideo[], pendingIds: string[], options: ChannelOptions): number {
+  const pending = new Set(pendingIds);
+  return videos.filter(({ videoId }) => pending.has(videoId)).reduce((sum, video) => sum + requestsFor(video, options), 0);
 }
 
 export function requestsFor(video: ChannelVideo, options: ChannelOptions): number {

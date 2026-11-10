@@ -38,6 +38,9 @@ GAP_WINDOWS = 1  # cho phép hụt 1 cửa sổ (khoảng nửa giây) giữa đ
 # Nhạc trong khoảng này chỉ được ghi lại để xem, không quyết định nhóm. Nhạc chạy cả phần thân vẫn bị bắt.
 INTRO_SECONDS = 8.0
 OUTRO_SECONDS = 8.0
+# Chỉ bỏ intro, outro khi phần thân còn lại đủ dài để nghe. Video ngắn hơn (thường là Shorts) được nghe cả video,
+# nếu không thì Short dưới 17 giây không còn gì để nghe và luôn bị xếp không nhạc.
+MIN_BODY_SECONDS = 30.0
 
 
 class DetectError(Exception):
@@ -79,6 +82,14 @@ class FrameResult:
     edge_seconds: float  # giây nghe thấy nhạc trong intro và outro (không tính)
 
 
+def body_bounds(count, intro=INTRO_SECONDS, outro=OUTRO_SECONDS):
+    """Vị trí cửa sổ đầu và sau cuối của phần thân video. Video ngắn thì phần thân là cả video."""
+    if count * HOP_SECONDS < intro + outro + MIN_BODY_SECONDS:
+        return 0, count
+    first = min(count, int(round(intro / HOP_SECONDS)))
+    return first, max(first, count - int(round(outro / HOP_SECONDS)))
+
+
 def classify_frames(scores, threshold=FRAME_THRESHOLD, min_run=MIN_RUN_SECONDS, min_total=MIN_TOTAL_SECONDS,
                     intro=INTRO_SECONDS, outro=OUTRO_SECONDS):
     """scores: điểm nhạc của từng cửa sổ (0-1). Bỏ qua `intro` giây đầu và `outro` giây cuối khi quyết định."""
@@ -86,8 +97,7 @@ def classify_frames(scores, threshold=FRAME_THRESHOLD, min_run=MIN_RUN_SECONDS, 
         # Không đọc được âm thanh thì không được kết luận "không nhạc".
         return FrameResult(CO_NHAC, 0.0, 0.0, 0.0, 0.0, 0.0)
     hits = [score >= threshold for score in scores]
-    first = min(len(scores), int(round(intro / HOP_SECONDS)))
-    last = max(first, len(scores) - int(round(outro / HOP_SECONDS)))
+    first, last = body_bounds(len(scores), intro, outro)
     body = hits[first:last]
     heard = sum(body) * HOP_SECONDS
     run = longest_run(body) * HOP_SECONDS
@@ -116,8 +126,7 @@ def clip_starts(scores, max_clips=MAX_CLIPS, step_seconds=STEP_SECONDS, clip_sec
     if not scores:
         return []
     width = max(1, int(clip_seconds / HOP_SECONDS))
-    first = min(len(scores), int(round(intro / HOP_SECONDS)))
-    last = max(first, len(scores) - int(round(outro / HOP_SECONDS)))
+    first, last = body_bounds(len(scores), intro, outro)
     if last - first < width:  # video quá ngắn: một đoạn duy nhất
         span = range(min(first, max(0, len(scores) - width)), min(first, max(0, len(scores) - width)) + 1)
     else:

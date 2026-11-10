@@ -53,6 +53,18 @@ class ClassifyFramesTests(unittest.TestCase):
         scores = [0.0] * 190 + [0.9] * 8 + [0.0] * 2
         self.assertEqual(classify_frames(scores, outro=0).group, CO_NHAC)
 
+    def test_short_video_full_of_music_is_music(self):
+        # Short 15 giây toàn nhạc: bỏ 8 giây đầu và 8 giây cuối thì không còn gì để nghe.
+        result = classify_frames([0.9] * windows(15))
+        self.assertEqual(result.group, CO_NHAC)
+        self.assertEqual(result.edge_seconds, 0, "video ngắn được nghe cả video")
+
+    def test_short_video_with_music_only_at_the_end_is_music(self):
+        self.assertEqual(classify_frames([0.0] * windows(35) + [0.9] * windows(5)).group, CO_NHAC)
+
+    def test_long_enough_video_still_skips_intro(self):
+        self.assertEqual(classify_frames([0.9] * windows(6) + [0.0] * windows(50)).group, KHONG_NHAC)
+
     def test_music_with_short_dropouts_is_one_run(self):
         # Nhạc nhỏ chập chờn dưới tiếng nói: hụt nửa giây vẫn là một đoạn liền.
         scores = [0.0] * 20 + [0.2, 0.1] * 3 + [0.2] + [0.0] * 20
@@ -111,6 +123,10 @@ class ClipStartsTests(unittest.TestCase):
 
     def test_very_short_video_gets_one_clip(self):
         self.assertEqual(len(clip_starts([0.9] * windows(20))), 1)
+
+    def test_short_video_clip_can_start_at_the_beginning(self):
+        starts = clip_starts([0.9] * windows(15))
+        self.assertEqual(starts, [0.0])
 
     def test_no_audio_no_clip(self):
         self.assertEqual(clip_starts([]), [])

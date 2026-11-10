@@ -547,11 +547,16 @@ function PastScans({ refreshKey, hiddenId }: { refreshKey: string; hiddenId?: st
 function RunPanel({
   scan,
   maxRequests,
+  remainingRequests,
+  isBusy,
   onAction,
   onNew,
 }: {
   scan: ChannelScanView;
   maxRequests: number;
+  remainingRequests: number;
+  /** Đang chờ máy chủ trả lời lần bấm trước, khóa các nút để không gửi hai lần. */
+  isBusy: boolean;
   onAction: (path: string) => void;
   onNew: () => void;
 }) {
@@ -568,6 +573,7 @@ function RunPanel({
   const canStop = isRunning || scan.status === 'paused';
   const gate = scan.gate;
   const isOverLimit = Boolean(gate && gate.requests > maxRequests);
+  const isOverDaily = Boolean(gate && !isOverLimit && gate.requests > remainingRequests);
   const subtitle =
     scan.status === 'done'
       ? scan.stoppedEarly
@@ -590,17 +596,17 @@ function RunPanel({
         </div>
         <div className="flex flex-wrap gap-2">
           {isRunning && (
-            <button type="button" onClick={() => onAction(`/${scan.id}/pause`)} className={SMALL_BUTTON}>
+            <button type="button" disabled={isBusy} onClick={() => onAction(`/${scan.id}/pause`)} className={SMALL_BUTTON}>
               Tạm dừng
             </button>
           )}
           {scan.status === 'paused' && (
-            <button type="button" onClick={() => onAction(`/${scan.id}/resume`)} className={SMALL_BUTTON}>
+            <button type="button" disabled={isBusy} onClick={() => onAction(`/${scan.id}/resume`)} className={SMALL_BUTTON}>
               Chạy tiếp
             </button>
           )}
           {canStop && (
-            <button type="button" onClick={() => onAction(`/${scan.id}/stop`)} className={SMALL_BUTTON}>
+            <button type="button" disabled={isBusy} onClick={() => onAction(`/${scan.id}/stop`)} className={SMALL_BUTTON}>
               Dừng phần chưa quét
             </button>
           )}
@@ -632,16 +638,21 @@ function RunPanel({
             {gate.noAudio > 0 && <>{number(gate.noAudio)} video không tải được âm thanh sẽ nằm ở nhóm Cần nghe lại. </>}
             Sẽ gửi <b className="tabular-nums">{number(gate.videos)}</b> video, dùng khoảng <b className="tabular-nums">{number(gate.requests)}</b> yêu cầu AudD.
           </p>
+          {isOverDaily && (
+            <p className="text-rose-700">
+              Hạn mức quét kênh hôm nay của bạn chỉ còn {number(remainingRequests)} yêu cầu. Hãy dừng ở đây và quét ít video hơn, hoặc thử lại vào ngày mai.
+            </p>
+          )}
           {isOverLimit && (
             <p className="text-rose-700">
               Vượt trần {number(maxRequests)} yêu cầu mỗi lần quét. Hãy dừng ở đây và quét ít video hơn, hoặc nhờ người quản trị tăng MAX_CHANNEL_SCAN_REQUESTS.
             </p>
           )}
           <div className="flex flex-wrap gap-2">
-            <button type="button" disabled={isOverLimit} onClick={() => onAction(`/${scan.id}/send`)} className={PRIMARY_BUTTON}>
+            <button type="button" disabled={isOverLimit || isOverDaily || isBusy} onClick={() => onAction(`/${scan.id}/send`)} className={PRIMARY_BUTTON}>
               {gate.videos === 0 ? 'Xem báo cáo' : 'Gửi nhận diện'}
             </button>
-            <button type="button" onClick={() => onAction(`/${scan.id}/stop`)} className={SMALL_BUTTON}>
+            <button type="button" disabled={isBusy} onClick={() => onAction(`/${scan.id}/stop`)} className={SMALL_BUTTON}>
               Dừng ở đây
             </button>
           </div>
@@ -851,6 +862,7 @@ export function ChannelTab() {
               <StatRow label="Video chưa quét trong phạm vi" value={number(fresh.length)} />
               <StatRow label="Yêu cầu AudD ước tính" value={`${needsFilterResult ? 'tối đa ' : ''}${number(worst)}`} />
               <StatRow label="Trần mỗi lần quét" value={number(state?.maxRequests ?? 0)} />
+              <StatRow label="Hạn mức còn lại hôm nay" value={number(state?.remainingRequests ?? 0)} />
               <StatRow label="Hỏi lại trước khi gửi" value={needsFilterResult ? 'Có, với số chính xác' : 'Có'} />
             </div>
             {longVideos > 0 && options.clips === 0 && <p className="text-xs text-amber-800">{number(longVideos)} video dài hơn giới hạn, chỉ quét {Math.round((scan?.maxSeconds ?? 0) / 60)} phút đầu.</p>}
@@ -878,6 +890,8 @@ export function ChannelTab() {
           <RunPanel
             scan={scan}
             maxRequests={state?.maxRequests ?? 0}
+            remainingRequests={state?.remainingRequests ?? 0}
+            isBusy={isBusy}
             onAction={(path) => void run(() => post(path))}
             onNew={() => {
               setIsNew(true);

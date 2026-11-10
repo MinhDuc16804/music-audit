@@ -9,6 +9,7 @@ import {
   pickToSend,
   searchChannelVideos,
   worstCaseRequests,
+  unsentRequests,
 } from './channelScan';
 import type { ChannelOptions, ChannelVideo } from './channelScan';
 
@@ -134,5 +135,18 @@ describe('CSV', () => {
     ]);
     expect(csv.split('\r\n')).toHaveLength(2);
     expect(csv).toContain('"Cần nghe lại"');
+  });
+});
+
+describe('unsentRequests', () => {
+  const videos = [
+    { videoId: 'a', title: 'A', seconds: 60, group: 'co-nhac', hasAudio: true, scanned: false, requests: 5, clipRequests: 2 },
+    { videoId: 'b', title: 'B', seconds: 60, group: 'co-nhac', hasAudio: true, scanned: false, requests: 7, clipRequests: 3 },
+  ];
+
+  it('cộng yêu cầu của các video còn chờ theo cách quét đã chọn', () => {
+    expect(unsentRequests(videos, ['b'], { filter: false, musicOnly: false, clips: 0, limit: 0 })).toBe(7);
+    expect(unsentRequests(videos, ['a', 'b'], { filter: true, musicOnly: false, clips: 4, limit: 0 })).toBe(5);
+    expect(unsentRequests(videos, [], { filter: false, musicOnly: false, clips: 0, limit: 0 })).toBe(0);
   });
 });

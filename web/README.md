@@ -59,8 +59,13 @@ docker compose up -d --build
 
 3. Mở `http://localhost:8080` trên chính máy đó để kiểm tra.
 
-App **chưa có đăng nhập** nên `compose.yml` chỉ mở cổng cho chính máy này. Muốn cho nhân viên vào, hãy dùng Cloudflare Tunnel và
-Cloudflare Access trỏ tới `http://localhost:8080`, đừng đổi cổng thành mở ra mạng. Gói miễn phí của Cloudflare chặn yêu cầu trên 100 MB,
+App không có trang đăng nhập riêng nên `compose.yml` chỉ mở cổng cho chính máy này. Muốn cho nhân viên vào, hãy dùng Cloudflare Tunnel và
+Cloudflare Access trỏ tới `http://localhost:8080`, đừng đổi cổng thành mở ra mạng.
+
+Nên điền `CF_ACCESS_TEAM_DOMAIN` (ví dụ `ten-cong-ty.cloudflareaccess.com`) và `CF_ACCESS_AUD` (Application Audience Tag trong trang
+ứng dụng của Access) vào `.env`. Khi có đủ hai biến, server kiểm chữ ký token Access của từng yêu cầu và lấy email từ token,
+nên không ai giả được email để có thêm lượt. Yêu cầu không có token hợp lệ bị từ chối. Thiếu hai biến này thì app tin header email
+như trước, chỉ an toàn khi không ai gọi thẳng được vào cổng 8080. Gói miễn phí của Cloudflare chặn yêu cầu trên 100 MB,
 nên app giới hạn file tải lên ở 95 MB. File lớn hơn thì xuất riêng phần âm thanh.
 
 Trên VPS, dữ liệu quét trong `out/` nằm ở nhà cung cấp ngoài công ty, và YouTube dễ chặn IP máy chủ hơn, nên quét bằng link có thể không chạy.
@@ -103,6 +108,9 @@ Mục Quét cả kênh nhận link kênh có @handle hoặc mã UC…, cần `YO
 
 - App luôn dừng hỏi trước khi gửi AudD, kèm số video và số yêu cầu chính xác. Tải âm thanh và lọc nhạc không tốn lượt.
 - Mỗi lần quét không dùng `MAX_SCANS_PER_USER_PER_DAY` mà dùng trần `MAX_CHANNEL_SCAN_REQUESTS`, mặc định 5000 yêu cầu. Vượt trần thì không gửi được. Người bấm xác nhận và số yêu cầu được ghi vào `out/usage.jsonl`.
+- Mỗi người còn có hạn mức `MAX_CHANNEL_REQUESTS_PER_USER_PER_DAY` yêu cầu AudD cho quét kênh mỗi ngày, mặc định 5000. Số yêu cầu được giữ khi bấm Gửi nhận diện, dừng giữa chừng thì hoàn lại phần chưa gửi. Bộ đếm về 0 lúc nửa đêm và khi khởi động lại app.
+- Một video làm lệnh gửi lỗi thì lần quét tạm dừng. Bấm Chạy tiếp mà vẫn lỗi đúng video đó thì app bỏ qua nó, video nằm ở nhóm Cần nghe lại.
+- Chọn gửi đoạn ngắn thì kết quả từng đoạn được lưu ngay ở `out/clips/`, nên lỗi giữa chừng rồi chạy lại không trả tiền lại các đoạn đã gửi. Mỗi video tối đa 30 đoạn.
 - Toàn máy chủ chỉ chạy một kênh một lúc, mỗi người chỉ có một lần quét dở. Đóng tab vẫn tiếp tục. App khởi động lại thì lần quét tạm dừng, phải bấm Chạy tiếp vì việc gửi AudD có tính phí.
 - Các lần quét đã xong nằm ở mục Các lần quét trước, giữ tối đa 100 lần, ai cũng mở lại được báo cáo mà không tốn lượt. Báo cáo đọc từ thư mục của kênh, nên gồm cả video quét sau đó. Lần quét có từ trước bản này không mở lại được.
 - Mỗi kênh có thư mục riêng `out/channels/<kênh>/`, dùng lại giữa các lần quét nên video đã quét không tốn lượt. Tùy chọn của lần sau không áp dụng cho video đã quét ở lần trước. File âm thanh bị xóa khi lần quét kết thúc.

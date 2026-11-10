@@ -1,5 +1,5 @@
 # Chạy app bằng: docker compose up -d --build
-# Cổng chỉ mở cho chính máy này vì app chưa có đăng nhập. Cho nhân viên vào qua Cloudflare Tunnel và Access, xem README.
+# Cổng chỉ mở cho chính máy này vì app không có trang đăng nhập riêng. Cho nhân viên vào qua Cloudflare Tunnel và Access, xem web/README.md.
 
 services:
   music-audit:

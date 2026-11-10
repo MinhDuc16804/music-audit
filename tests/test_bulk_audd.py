@@ -315,6 +315,20 @@ class ClipFlowTests(ServerTestCase):
         self.assertGreaterEqual(raw["clip_starts"][0], 7.5, "đoạn cắt không nằm trong intro")
         self.assertTrue(all(chunk["offset"] >= "00:08" for chunk in raw["response"]["result"]), "offset tính theo giây trong video")
 
+    def test_clip_results_are_kept_so_a_retry_does_not_pay_again(self):
+        self.run_command("submit", "--delay", "0", "--all-videos", "--music-only", "--clips", "8")
+        self.assertEqual(len(FakeAudd.requests), 1)
+        self.assertTrue(list((self.workdir / "out/clips/clipvid0000").glob("*.json")), "kết quả từng đoạn được lưu ngay")
+        # Giả lập lần trước lỗi giữa chừng: video chưa được ghi là đã quét, nhưng đoạn đã gửi vẫn còn.
+        (self.workdir / "out/submissions.json").unlink()
+        self.run_command("submit", "--delay", "0", "--all-videos", "--music-only", "--clips", "8")
+        self.assertEqual(len(FakeAudd.requests), 1, "đoạn đã có kết quả không bị gửi lại")
+
+    def test_clip_count_has_a_cap(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            audit.build_parser().parse_args(["submit", "--clips", "999"])
+        self.assertEqual(audit.build_parser().parse_args(["submit", "--clips", "20"]).clips, 20)
+
     def test_compare_clips_against_full_scan(self):
         self.run_command("submit", "--delay", "0", "--all-videos", "--music-only")
         FakeAudd.requests.clear()
@@ -329,6 +343,13 @@ class ClipFlowTests(ServerTestCase):
 
 
 class HelperTests(unittest.TestCase):
+    def test_video_id_starting_with_dash_is_not_read_as_an_option(self):
+        # Cách web app truyền mã: liền với dấu =, hoặc sau "--" với các lệnh nhận nhiều mã.
+        parser = audit.build_parser()
+        self.assertEqual(parser.parse_args(["submit", "--video-id=-abcdefghij"]).video_id, "-abcdefghij")
+        self.assertEqual(parser.parse_args(["history", "--", "-abcdefghij", "dQw4w9WgXcQ"]).ids, ["-abcdefghij", "dQw4w9WgXcQ"])
+        self.assertEqual(parser.parse_args(["durations", "--", "-abcdefghij"]).video_id, ["-abcdefghij"])
+
     def test_saved_record_counts_song_once_per_chunk(self):
         raw = {"provider": "audd", "duration_seconds": 30, "response": {"status": "success", "result": [
             {"songs": [SONG], "offset": "00:00"}, {"songs": [SONG, SONG], "offset": "00:12"}]}}

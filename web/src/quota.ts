@@ -28,6 +28,9 @@ export interface QuotaResponse extends QuotaReading {
   remainingScans: number;
   dailyLimit: number;
   maxChannelRequests: number;
+  /** Số yêu cầu AudD người này còn dùng được cho quét cả kênh hôm nay. */
+  remainingChannelRequests: number;
+  dailyChannelRequests: number;
 }
 
 export function percentUsed(account: QuotaAccount): number {
