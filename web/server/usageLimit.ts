@@ -17,8 +17,10 @@ export interface UsageEntry {
   kind: 'link' | 'file' | 'batch' | 'channel';
   target: string;
   outcome: 'done' | 'error' | 'limited';
-  /** Mã tìm lại kết quả đã lưu, dùng cho file tải lên vì tên file không đủ để tìm. */
+  /** Mã tìm lại kết quả đã lưu: mã băm của file tải lên, hoặc mã lần quét kênh. */
   resultId?: string;
+  /** Người dùng bấm Quét lại, nên lượt này gửi AudD dù đã có kết quả cũ. */
+  rescan?: true;
 }
 
 export function getUserEmail(headers: Record<string, string | string[] | undefined>): string {
@@ -33,7 +35,14 @@ export function parseDailyLimit(value: string | undefined): number {
   return Number.isInteger(limit) && limit >= 0 ? limit : DEFAULT_MAX_SCANS_PER_DAY;
 }
 
-export function createDailyLimiter(maxPerDay: number, getToday: () => string = () => new Date().toISOString().slice(0, 10)) {
+const DAY_FORMAT = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit' });
+
+/** Ngày theo giờ Việt Nam, dạng YYYY-MM-DD, để bộ đếm về 0 lúc nửa đêm ở Việt Nam chứ không phải 7 giờ sáng. */
+export function getLimitDay(now: Date = new Date()): string {
+  return DAY_FORMAT.format(now);
+}
+
+export function createDailyLimiter(maxPerDay: number, getToday: () => string = getLimitDay) {
   let day = '';
   let counts = new Map<string, number>();
 

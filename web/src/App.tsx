@@ -21,7 +21,7 @@ import {
   Tv,
   Video,
 } from 'lucide-react';
-import { buildAudioLibraryIndex, isAudioLibraryFile } from './audioLibrary';
+import { buildAudioLibraryIndex, describeLibrary, isAudioLibraryFile } from './audioLibrary';
 import type { AudioLibraryFile, AudioLibraryIndex } from './audioLibrary';
 import { BatchTab } from './BatchTab';
 import { MAX_BATCH_VIDEOS } from './batchScan';
@@ -32,6 +32,8 @@ import { Panel, SectionTitle, SoundBars, TrackList } from './components';
 import { readMediaDuration } from './mediaDuration';
 import { HistoryTab } from './HistoryTab';
 import { QuotaTab } from './QuotaTab';
+import { RescanControl } from './RescanControl';
+import { requestIdentify, requestIdentifyFile } from './scanJob';
 import { MAX_UPLOAD_BYTES, MAX_UPLOAD_MB, UPLOAD_TOO_LARGE_MESSAGE } from './uploadLimit';
 import { getVideoVerdict } from './videoCheck';
 import type { IdentifyResult, VideoVerdictKind } from './videoCheck';
@@ -155,9 +157,20 @@ function useAudioLibrary(): AudioLibraryState {
   return library;
 }
 
-function ScanFacts({ facts }: { facts: typeof SCAN_FACTS }) {
+function ScanFacts({ facts, libraryFile }: { facts: typeof SCAN_FACTS; libraryFile?: AudioLibraryFile }) {
+  const libraryNote = libraryFile ? describeLibrary(libraryFile, new Date()) : null;
   return (
     <ul className="mt-4 flex flex-wrap gap-2">
+      {libraryNote && (
+        <li
+          className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset ${
+            libraryNote.isStale ? 'bg-amber-300 text-amber-950 ring-amber-200' : 'bg-white/10 text-white ring-white/20'
+          }`}
+        >
+          {libraryNote.isStale ? <ShieldAlert className="h-3.5 w-3.5" /> : <Library className="h-3.5 w-3.5" />}
+          {libraryNote.label}
+        </li>
+      )}
       {facts.map((fact) => (
         <li
           key={fact.label}
@@ -171,7 +184,7 @@ function ScanFacts({ facts }: { facts: typeof SCAN_FACTS }) {
   );
 }
 
-function PageHero({ tab }: { tab: (typeof TABS)[number] }) {
+function PageHero({ tab, libraryFile }: { tab: (typeof TABS)[number]; libraryFile?: AudioLibraryFile }) {
   return (
     <header className="relative mb-6 overflow-hidden rounded-2xl bg-linear-to-br from-brand-950 via-brand-900 to-brand-700 px-6 py-6 text-white shadow-card">
       <SoundBars className="absolute right-6 bottom-0 hidden h-4/5 w-72 text-brand-300 opacity-25 md:flex" />
@@ -181,8 +194,8 @@ function PageHero({ tab }: { tab: (typeof TABS)[number] }) {
           {tab.label}
         </h1>
         <p className="mt-2 max-w-2xl text-sm text-brand-100">{tab.description}</p>
-        {tab.id === 'video' && <ScanFacts facts={SCAN_FACTS} />}
-        {tab.id === 'batch' && <ScanFacts facts={BATCH_FACTS} />}
+        {tab.id === 'video' && <ScanFacts facts={SCAN_FACTS} libraryFile={libraryFile} />}
+        {tab.id === 'batch' && <ScanFacts facts={BATCH_FACTS} libraryFile={libraryFile} />}
         {tab.id === 'channel' && <ScanFacts facts={CHANNEL_FACTS} />}
       </div>
     </header>
@@ -226,34 +239,6 @@ function EmptyResult() {
       </ul>
     </Panel>
   );
-}
-
-async function readIdentifyResponse(response: Response): Promise<IdentifyResult> {
-  const payload: unknown = await response.json().catch(() => null);
-  if (!response.ok || payload === null) {
-    const message = (payload as { error?: string } | null)?.error;
-    throw new Error(message ?? 'Không gọi được phần quét. Hãy chạy app bằng npm.cmd run dev.');
-  }
-  return payload as IdentifyResult;
-}
-
-/** Gọi quét một lần. Gọi lại với cùng video chỉ lấy kết quả, không gửi quét lại. */
-async function requestIdentify(url: string): Promise<IdentifyResult> {
-  const response = await fetch('/api/identify', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url }),
-  });
-  return readIdentifyResponse(response);
-}
-
-async function requestIdentifyFile(file: File): Promise<IdentifyResult> {
-  const response = await fetch('/api/identify-file', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/octet-stream', 'X-File-Name': encodeURIComponent(file.name) },
-    body: file,
-  });
-  return readIdentifyResponse(response);
 }
 
 function VideoTab({ library }: { library: AudioLibraryState }) {
@@ -316,7 +301,8 @@ function VideoTab({ library }: { library: AudioLibraryState }) {
     setIsScanning(true);
 
     try {
-      const scan = await (uploadFile ? requestIdentifyFile(uploadFile) : requestIdentify(videoLink));
+      const isCurrent = () => scanIdRef.current === scanId;
+      const scan = await (uploadFile ? requestIdentifyFile(uploadFile, isCurrent) : requestIdentify(videoLink, isCurrent));
       const duration = uploadFile ? await readMediaDuration(uploadFile) : scan.duration_seconds;
       if (scanIdRef.current === scanId) {
         setResult({ ...scan, duration_seconds: duration });
@@ -393,12 +379,21 @@ function VideoTab({ library }: { library: AudioLibraryState }) {
               {verdict.title}
             </h3>
             <p className="mt-1 text-sm text-slate-600">{verdict.detail}</p>
+            {result.cached && result.status === 'done' && (
+              <div className="mt-3">
+                <RescanControl
+                  result={result}
+                  start={(isCurrent) => (uploadFile ? requestIdentifyFile(uploadFile, isCurrent, true) : requestIdentify(result.url, isCurrent, true))}
+                  onDone={(fresh) => setResult({ ...fresh, duration_seconds: uploadFile ? result.duration_seconds : fresh.duration_seconds })}
+                />
+              </div>
+            )}
           </header>
 
           {verdict.tracks.length > 0 && (
             <section className="space-y-2 px-5 py-4">
               <SectionTitle>Bài máy nhận ra ({verdict.tracks.length})</SectionTitle>
-              <TrackList tracks={verdict.tracks} />
+              <TrackList tracks={verdict.tracks} videoUrl={result.url} durationSeconds={result.duration_seconds} />
             </section>
           )}
 
@@ -417,7 +412,7 @@ function VideoTab({ library }: { library: AudioLibraryState }) {
             <>
               <SoundBars className="h-12 w-28 text-brand-600" />
               <p className="mt-4 text-sm font-semibold text-slate-800">Đang quét</p>
-              <p className="mt-1 text-sm text-slate-500">Có thể mất vài phút. Nội dung đã quét xong sẽ không bị tính phí lại.</p>
+              <p className="mt-1 text-sm text-slate-500">Có thể mất vài phút. Dừng chờ thì máy chủ vẫn quét nốt, kết quả nằm ở tab Lịch sử quét.</p>
               <button
                 type="button"
                 onClick={cancelScan}
@@ -525,7 +520,7 @@ export default function App() {
 
       <div className="flex min-h-screen flex-col lg:pl-60">
         <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 lg:px-8">
-          <PageHero tab={currentTab} />
+          <PageHero tab={currentTab} libraryFile={library.file} />
 
           {/* Giữ các tab luôn được mount để đổi tab không làm mất form, kết quả và checklist. */}
           <div hidden={activeTab !== 'video'}>

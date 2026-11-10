@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { isSameOriginJson, isSameOriginUpload, parseUploadName } from '../server/identifyPlugin.ts';
+import { isSameOriginJson, isSameOriginUpload, parseLinkRequest, parseUploadName } from '../server/identifyPlugin.ts';
 import { buildAudioLibraryIndex } from './audioLibrary';
-import { getScanCoverage, getVideoVerdict, hasSteadyTimecodes, needsStudioLookup, parseTimecode } from './videoCheck';
+import { getScanCoverage, getTrackRanges, getVideoVerdict, hasSteadyTimecodes, needsStudioLookup, parseTimecode } from './videoCheck';
 import type { IdentifyResult, VideoTrack } from './videoCheck';
-import { getVideoUrl, parseYoutubeVideoId } from './youtubeLink';
+import { getVideoTimeUrl, getVideoUrl, parseYoutubeVideoId } from './youtubeLink';
 
 const VIDEO_ID = 'dQw4w9WgXcQ';
 
@@ -362,5 +362,52 @@ describe('needsStudioLookup', () => {
 
   it('bài đã bỏ qua vì có thể nhận nhầm thì không cần tra', () => {
     expect(needsStudioLookup({ isIgnored: true })).toBe(false);
+  });
+});
+
+describe('getTrackRanges', () => {
+  const segment = (offset: string, ...tracks: number[]) => ({ offset, tracks });
+
+  it('gộp các đoạn liền nhau thành một khoảng', () => {
+    expect(getTrackRanges(0, [segment('00:00', 0), segment('00:12', 0), segment('00:24', 0, 1)])).toEqual([{ start: 0, end: 36 }]);
+  });
+
+  it('đoạn cách xa thì thành khoảng riêng, xếp theo thời gian', () => {
+    expect(getTrackRanges(1, [segment('03:36', 1), segment('02:00', 1), segment('02:12', 1), segment('00:00', 0)])).toEqual([
+      { start: 120, end: 144 },
+      { start: 216, end: 228 },
+    ]);
+  });
+
+  it('bài không có đoạn nào hoặc đoạn không đọc được vị trí thì không có khoảng', () => {
+    expect(getTrackRanges(2, [segment('00:00', 0)])).toEqual([]);
+    expect(getTrackRanges(0, [segment('', 0)])).toEqual([]);
+  });
+});
+
+describe('getVideoTimeUrl', () => {
+  it('mở video đúng giây', () => {
+    expect(getVideoTimeUrl('https://youtu.be/dQw4w9WgXcQ', 120.7)).toBe('https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=120s');
+  });
+
+  it('tên file tải lên thì không có link', () => {
+    expect(getVideoTimeUrl('bai-dung.mp3', 10)).toBe('');
+  });
+});
+
+describe('parseLinkRequest', () => {
+  const link = `https://www.youtube.com/watch?v=${VIDEO_ID}`;
+
+  it('chỉ quét lại khi yêu cầu ghi rõ rescan là true', () => {
+    expect(parseLinkRequest(JSON.stringify({ url: link }))).toEqual({ videoId: VIDEO_ID, rescan: false });
+    expect(parseLinkRequest(JSON.stringify({ url: link, rescan: true }))).toEqual({ videoId: VIDEO_ID, rescan: true });
+    for (const rescan of ['true', 1, {}, null]) {
+      expect(parseLinkRequest(JSON.stringify({ url: link, rescan })).rescan).toBe(false);
+    }
+  });
+
+  it('yêu cầu sai thì không có video và không quét lại', () => {
+    expect(parseLinkRequest('khong-phai-json')).toEqual({ videoId: '', rescan: false });
+    expect(parseLinkRequest(JSON.stringify({ url: 'https://www.youtube.com/@kenh', rescan: true }))).toEqual({ videoId: '', rescan: true });
   });
 });

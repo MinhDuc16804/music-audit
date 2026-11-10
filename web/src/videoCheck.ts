@@ -12,7 +12,9 @@ import { findAudioLibraryTrack, findNearAudioLibraryTrack } from './audioLibrary
 import type { AudioLibraryIndex, AudioLibraryTrack } from './audioLibrary.ts';
 
 /** Độ dài một đoạn quét của AudD, xem CHUNK_SECONDS trong music_audit/audd.py. */
-const SCAN_SEGMENT_SECONDS = 12;
+export const SCAN_SEGMENT_SECONDS = 12;
+/** Hai đoạn cách nhau không quá từng này giây thì coi là một khoảng phát liền. */
+const RANGE_GAP_SECONDS = 1;
 /** Tỷ lệ thời lượng tối thiểu AudD phải nhận ra thì mới được kết luận Được dùng. */
 const MIN_COVERAGE = 0.8;
 /** Độ lệch cho phép khi so vị trí trong bài với thời gian trong video. */
@@ -58,10 +60,22 @@ export interface IdentifyResult {
   duration_seconds?: number;
   /** Thời lượng tối đa được quét. */
   max_seconds?: number;
+  /** Kết quả lấy lại từ lần quét trước, không gửi gì cho AudD. */
+  cached?: boolean;
+  /** Thời điểm AudD quét, dạng ISO. */
+  scanned_at?: string;
+}
+
+/** Một khoảng bài phát trong video, tính bằng giây. */
+export interface TrackRange {
+  start: number;
+  end: number;
 }
 
 export interface CheckedTrack {
   track: VideoTrack;
+  /** Các khoảng trong video mà AudD thấy bài này, để người duyệt nghe lại đúng chỗ. */
+  ranges?: TrackRange[];
   /** Bài tương ứng trong thư viện, không có nghĩa là không nằm trong thư viện. */
   libraryTrack?: AudioLibraryTrack;
   /** Bài trùng tên trong thư viện khi không khớp chắc. */
@@ -116,6 +130,26 @@ export function hasSteadyTimecodes(position: number, segments: ScanSegment[]): b
   });
 }
 
+/** Gộp các đoạn quét liền nhau có bài này thành từng khoảng phát trong video. Đoạn không đọc được vị trí thì bỏ qua. */
+export function getTrackRanges(position: number, segments: ScanSegment[]): TrackRange[] {
+  const starts = segments
+    .flatMap((segment) => {
+      const start = parseTimecode(segment.offset);
+      return segment.tracks.includes(position) && start !== undefined ? [start] : [];
+    })
+    .sort((first, second) => first - second);
+  const ranges: TrackRange[] = [];
+  for (const start of starts) {
+    const last = ranges.at(-1);
+    if (last && start <= last.end + RANGE_GAP_SECONDS) {
+      last.end = Math.max(last.end, start + SCAN_SEGMENT_SECONDS);
+    } else {
+      ranges.push({ start, end: start + SCAN_SEGMENT_SECONDS });
+    }
+  }
+  return ranges;
+}
+
 function getCoverageDetail(coverage: ScanCoverage): string {
   if (coverage.kind === 'low') {
     return `AudD chỉ nhận ra khoảng ${coverage.percent}% thời lượng. Phần còn lại có thể là lời nói hoặc nhạc khác, hãy nghe kiểm tra.`;
@@ -137,7 +171,13 @@ export function getVideoVerdict(result: IdentifyResult, libraryIndex: AudioLibra
   const tracks = (result.tracks ?? []).map((track, position): CheckedTrack => {
     const libraryTrack = findAudioLibraryTrack(track.title, track.artists, libraryIndex, track.album);
     const nearTrack = libraryTrack ? undefined : findNearAudioLibraryTrack(track.title, libraryIndex);
-    return { track, libraryTrack, nearTrack, hasEvidence: !result.segments || hasSteadyTimecodes(position, scanSegments) };
+    return {
+      track,
+      libraryTrack,
+      nearTrack,
+      hasEvidence: !result.segments || hasSteadyTimecodes(position, scanSegments),
+      ranges: result.segments ? getTrackRanges(position, result.segments) : [],
+    };
   });
   const isOutside = ({ libraryTrack, nearTrack }: CheckedTrack) => !libraryTrack && !nearTrack;
   const segments = scanSegments.map((segment) => segment.tracks.flatMap((position) => tracks[position] ?? []));

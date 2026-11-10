@@ -36,6 +36,14 @@ describe('parseUsageLog', () => {
     expect(parseUsageLog(line({ kind: 'file', target: 'f', resultId: '../../.env' }))[0].resultKey).toBeUndefined();
   });
 
+  it('đọc dấu Quét lại và mã lần quét kênh', () => {
+    const scanId = '123e4567-e89b-42d3-a456-426614174000';
+    expect(parseUsageLog(line({ kind: 'link', target: `https://youtu.be/${A}`, rescan: true }))[0].rescan).toBe(true);
+    expect(parseUsageLog(line({ kind: 'link', target: `https://youtu.be/${A}`, rescan: 'co' }))[0].rescan).toBeUndefined();
+    expect(parseUsageLog(line({ kind: 'channel', target: 'https://www.youtube.com/@kenh (2 video, 10 yêu cầu)', resultId: scanId }))[0].scanId).toBe(scanId);
+    expect(parseUsageLog(line({ kind: 'channel', target: 'x', resultId: '../../.env' }))[0].scanId).toBeUndefined();
+  });
+
   it('thiếu người dùng thì ghi là không rõ', () => {
     expect(parseUsageLog(line({ kind: 'link', target: 'x', user: '' }))[0].user).toBe('khong-ro');
   });

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applyLibraryAdditions,
   buildAudioLibraryIndex,
+  describeLibrary,
   findAudioLibraryTrack,
   findNearAudioLibraryTrack,
   getArtistCandidates,
@@ -288,5 +289,25 @@ describe('isAudioLibraryFile', () => {
     expect(isAudioLibraryFile({ tracks: [{ title: 'A', artist: 'X', attribution: false }] })).toBe(true);
     expect(isAudioLibraryFile({ tracks: [] })).toBe(false);
     expect(isAudioLibraryFile(null)).toBe(false);
+  });
+});
+
+describe('describeLibrary', () => {
+  const tracks = [{ title: 'A', artist: 'X', attribution: false }];
+  const today = new Date(2026, 10, 10);
+
+  it('danh sách còn mới thì hiện ngày và số bài', () => {
+    expect(describeLibrary({ sourceUpdatedOn: '2026-11-07', tracks }, today)).toEqual({ label: 'Thư viện cập nhật 07/11/2026 · 1 bài', isStale: false });
+    expect(describeLibrary({ sourceUpdatedOn: '2026-10-11', tracks }, today).isStale).toBe(false);
+  });
+
+  it('quá 30 ngày thì báo cần cập nhật', () => {
+    expect(describeLibrary({ sourceUpdatedOn: '2026-10-10', tracks }, today)).toEqual({ label: 'Thư viện cập nhật 10/10/2026 · đã 31 ngày, cần cập nhật', isStale: true });
+  });
+
+  it('không đọc được ngày thì coi là cũ', () => {
+    for (const sourceUpdatedOn of ['', 'hôm qua', undefined as unknown as string]) {
+      expect(describeLibrary({ sourceUpdatedOn, tracks }, today)).toEqual({ label: 'Thư viện chưa rõ ngày cập nhật · 1 bài', isStale: true });
+    }
   });
 });

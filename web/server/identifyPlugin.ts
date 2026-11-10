@@ -21,10 +21,13 @@ import type { QuotaResponse } from '../src/quota.ts';
 import type { IdentifyResult } from '../src/videoCheck.ts';
 import { getVideoUrl, parseYoutubeVideoId } from '../src/youtubeLink.ts';
 import { parseChannelInput, parseChannelOptions } from '../src/channelScan.ts';
+import type { ChannelHistoryResponse } from '../src/channelScan.ts';
 import { BATCH_ROUTE, BatchError, createBatchRunner, matchBatchRoute, parseBatchVideoIds } from './batchRunner.ts';
 import { CHANNEL_ROUTE, ChannelError, createChannelRunner, matchChannelRoute, parseMaxRequests } from './channelRunner.ts';
 import { HISTORY_ROUTE, readHistory } from './history.ts';
 import { AuddCommandError, createQuotaReader, QUOTA_ROUTE } from './quota.ts';
+import type { ScanJobStarted, ScanJobView } from '../src/scanJob.ts';
+import { createScanJobs, JOB_ROUTE, parseJobId } from './scanJobs.ts';
 import { appendUsage, createDailyLimiter, getUserEmail, parseDailyLimit } from './usageLimit.ts';
 import type { UsageEntry } from './usageLimit.ts';
 
@@ -198,12 +201,13 @@ function runAudit(auditRoot: string, commandArgs: string[]): Promise<unknown> {
   return startAudit(auditRoot, commandArgs).done.then(parseAuditOutput);
 }
 
-function parseRequestedVideoId(body: string): string {
+/** Quét lại tốn yêu cầu AudD, nên chỉ bật khi yêu cầu ghi rõ rescan là true. */
+export function parseLinkRequest(body: string): { videoId: string; rescan: boolean } {
   try {
-    const { url } = JSON.parse(body) as { url?: unknown };
-    return typeof url === 'string' ? parseYoutubeVideoId(url) : '';
+    const { url, rescan } = JSON.parse(body) as { url?: unknown; rescan?: unknown };
+    return { videoId: typeof url === 'string' ? parseYoutubeVideoId(url) : '', rescan: rescan === true };
   } catch {
-    return '';
+    return { videoId: '', rescan: false };
   }
 }
 
@@ -222,8 +226,16 @@ export function createHandlers(getAuditRoot: () => string) {
   const allowScan = createDailyLimiter(parseDailyLimit(process.env.MAX_SCANS_PER_USER_PER_DAY));
   const getOutFolder = () => join(process.env.MUSIC_AUDIT_WORKDIR ?? getAuditRoot(), 'out');
 
-  const logUsage = (user: string, kind: UsageEntry['kind'], target: string, outcome: UsageEntry['outcome'], resultId?: string) =>
-    appendUsage(join(getOutFolder(), 'usage.jsonl'), { time: new Date().toISOString(), user, kind, target, outcome, ...(resultId ? { resultId } : {}) });
+  const logUsage = (user: string, kind: UsageEntry['kind'], target: string, outcome: UsageEntry['outcome'], resultId?: string, rescan = false) =>
+    appendUsage(join(getOutFolder(), 'usage.jsonl'), {
+      time: new Date().toISOString(),
+      user,
+      kind,
+      target,
+      outcome,
+      ...(resultId ? { resultId } : {}),
+      ...(rescan ? { rescan: true as const } : {}),
+    });
 
   const handleHistory = async (request: IncomingMessage, response: ServerResponse) => {
     if (request.method !== 'GET') {
@@ -286,7 +298,7 @@ export function createHandlers(getAuditRoot: () => string) {
     runQueued: (workdir, args) => enqueueJob(() => startAudit(getAuditRoot(), args, { workdir }, CHANNEL_ENV).done),
     readJson: (workdir, args) => startAudit(getAuditRoot(), args, { workdir }, CHANNEL_ENV).done.then(parseAuditOutput),
     removeAudio: (workdir) => rm(join(workdir, 'data', 'audio'), { recursive: true, force: true }),
-    logUsage: (user, target, outcome) => logUsage(user, 'channel', target, outcome),
+    logUsage: (user, target, outcome, scanId) => logUsage(user, 'channel', target, outcome, scanId),
     maxRequests: maxChannelRequests,
   });
 
@@ -311,7 +323,9 @@ export function createHandlers(getAuditRoot: () => string) {
       } else if (route.action === 'requirements') {
         sendJson(response, 200, await startAudit(getAuditRoot(), ['channel-check']).done.then(parseAuditOutput));
       } else if (route.action === 'report') {
-        sendJson(response, 200, await channelRunner.report(user, route.scanId));
+        sendJson(response, 200, await channelRunner.report(route.scanId));
+      } else if (route.action === 'history') {
+        sendJson(response, 200, { scans: await channelRunner.history() } satisfies ChannelHistoryResponse);
       } else if (route.action === 'create') {
         const { channel, skipShorts } = JSON.parse(await readBody(request)) as { channel?: unknown; skipShorts?: unknown };
         const parsed = typeof channel === 'string' ? parseChannelInput(channel) : null;
@@ -414,6 +428,21 @@ export function createHandlers(getAuditRoot: () => string) {
     return false;
   };
 
+  const scanJobs = createScanJobs();
+
+  /** Quét một nội dung ở nền rồi ghi nhật ký. Quét lỗi thì không có kết quả, nên hoàn lại lượt đã tính. */
+  const runScan = async (user: string, kind: 'link' | 'file', target: string, rescan: boolean, scan: () => Promise<IdentifyResult>) => {
+    try {
+      const result = await scan();
+      await logUsage(user, kind, target, 'done', kind === 'file' ? result.video_id : undefined, rescan);
+      return result;
+    } catch (error) {
+      allowScan.release(user, 1);
+      await logUsage(user, kind, target, 'error', undefined, rescan);
+      throw error;
+    }
+  };
+
   const handleLink = async (request: IncomingMessage, response: ServerResponse) => {
     if (request.method !== 'POST') {
       sendJson(response, 405, { error: 'Chỉ nhận POST' });
@@ -427,7 +456,7 @@ export function createHandlers(getAuditRoot: () => string) {
     const user = getUserEmail(request.headers);
     let target = '';
     try {
-      const videoId = parseRequestedVideoId(await readBody(request));
+      const { videoId, rescan } = parseLinkRequest(await readBody(request));
       if (!videoId) {
         sendJson(response, 400, { error: 'Chỉ nhận link của một video YouTube, không nhận link kênh hay playlist.' });
         return;
@@ -437,13 +466,27 @@ export function createHandlers(getAuditRoot: () => string) {
         return;
       }
       // Server tự tách mp3 rồi gửi file cho AudD, nên không cần AudD đọc được link YouTube.
-      const result = await enqueue(['identify', target, '--extract']);
-      await logUsage(user, 'link', target, 'done');
-      sendJson(response, 200, result);
+      const args = ['identify', target, '--extract', ...(rescan ? ['--rescan'] : [])];
+      const jobId = scanJobs.start(user, () => runScan(user, 'link', target, rescan, () => enqueue(args) as Promise<IdentifyResult>));
+      sendJson(response, 202, { jobId } satisfies ScanJobStarted);
     } catch (error) {
-      await logUsage(user, 'link', target, 'error');
       sendJson(response, 502, { error: error instanceof Error ? error.message : 'Lỗi không xác định' });
     }
+  };
+
+  const handleJob = (request: IncomingMessage, response: ServerResponse) => {
+    if (request.method !== 'GET') {
+      sendJson(response, 405, { error: 'Chỉ nhận GET' });
+      return;
+    }
+    const { originalUrl } = request as IncomingMessage & { originalUrl?: string };
+    const { pathname } = new URL(originalUrl ?? request.url ?? '/', 'http://localhost');
+    const job = scanJobs.get(getUserEmail(request.headers), parseJobId(pathname));
+    sendJson(
+      response,
+      200,
+      job ?? ({ status: 'error', error: 'Không còn thấy lần quét này, có thể app vừa khởi động lại. Hãy bấm Kiểm tra lại, nội dung đã quét xong không bị tính phí lần nữa.' } satisfies ScanJobView),
+    );
   };
 
   const handleFile = async (request: IncomingMessage, response: ServerResponse) => {
@@ -469,26 +512,30 @@ export function createHandlers(getAuditRoot: () => string) {
     }
 
     const folder = await mkdtemp(join(tmpdir(), 'credit-checker-'));
+    const removeFolder = () => rm(folder, { recursive: true, force: true }).catch(() => undefined);
+    const uploadPath = join(folder, `upload${extname(fileName).toLowerCase()}`);
     try {
-      const uploadPath = join(folder, `upload${extname(fileName).toLowerCase()}`);
       await saveUpload(request, uploadPath);
-      const result = await enqueue(['identify-file', uploadPath, `--name=${fileName}`]);
-      await logUsage(user, 'file', fileName, 'done', (result as IdentifyResult).video_id);
-      sendJson(response, 200, result);
     } catch (error) {
+      // File chưa tới nơi thì chưa gửi gì cho AudD, nên hoàn lượt.
+      allowScan.release(user, 1);
+      await removeFolder();
       await logUsage(user, 'file', fileName, 'error');
       sendJson(response, 502, { error: error instanceof Error ? error.message : 'Lỗi không xác định' });
-    } finally {
-      await rm(folder, { recursive: true, force: true });
+      return;
     }
+    const rescan = request.headers['x-rescan'] === '1';
+    const args = ['identify-file', uploadPath, `--name=${fileName}`, ...(rescan ? ['--rescan'] : [])];
+    const jobId = scanJobs.start(user, () => runScan(user, 'file', fileName, rescan, () => enqueue(args) as Promise<IdentifyResult>).finally(removeFolder));
+    sendJson(response, 202, { jobId } satisfies ScanJobStarted);
   };
 
-  return { handleLink, handleFile, handleBatch, handleChannel, handleQuota, handleHistory, startBatches: batchRunner.start };
+  return { handleLink, handleFile, handleJob, handleBatch, handleChannel, handleQuota, handleHistory, startBatches: batchRunner.start };
 }
 
 export function identifyPlugin(): Plugin {
   let auditRoot = '';
-  const { handleLink, handleFile, handleBatch, handleChannel, handleQuota, handleHistory, startBatches } = createHandlers(() => auditRoot);
+  const { handleLink, handleFile, handleJob, handleBatch, handleChannel, handleQuota, handleHistory, startBatches } = createHandlers(() => auditRoot);
 
   return {
     name: 'music-audit-identify',
@@ -498,6 +545,7 @@ export function identifyPlugin(): Plugin {
     configureServer(server) {
       server.middlewares.use(FILE_ROUTE, handleFile);
       server.middlewares.use(ROUTE, handleLink);
+      server.middlewares.use(JOB_ROUTE, handleJob);
       server.middlewares.use(BATCH_ROUTE, handleBatch);
       server.middlewares.use(CHANNEL_ROUTE, handleChannel);
       server.middlewares.use(QUOTA_ROUTE, handleQuota);
@@ -507,6 +555,7 @@ export function identifyPlugin(): Plugin {
     configurePreviewServer(server) {
       server.middlewares.use(FILE_ROUTE, handleFile);
       server.middlewares.use(ROUTE, handleLink);
+      server.middlewares.use(JOB_ROUTE, handleJob);
       server.middlewares.use(BATCH_ROUTE, handleBatch);
       server.middlewares.use(CHANNEL_ROUTE, handleChannel);
       server.middlewares.use(QUOTA_ROUTE, handleQuota);

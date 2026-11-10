@@ -18,6 +18,9 @@ const STUDIO_STANDARD_LICENSE = 'yt-audio-library';
 /** Tên ngắn phải có ít nhất từng này từ mới được coi là cách viết khác của tên dài. */
 const MIN_PARTIAL_NAME_WORDS = 2;
 
+/** YouTube thêm bài mới hai lần mỗi tháng, nên danh sách quá từng này ngày thì coi là cũ. */
+const LIBRARY_STALE_AFTER_DAYS = 30;
+
 /** Các cột bắt buộc của library-additions.csv. */
 const ADDITION_COLUMNS = ['title', 'artist', 'attribution', 'checkedBy', 'checkedOn'];
 
@@ -198,6 +201,19 @@ export function applyLibraryAdditions(tracks: AudioLibraryTrack[], additions: Au
     return [track.manual || track.unconfirmed ? { ...addition, attribution, manual: true } : { ...track, attribution }];
   });
   return [...kept, ...[...pending.values()].map((track) => ({ ...track, manual: true }))];
+}
+
+/** Cho người duyệt biết danh sách mới hay cũ. Không đọc được ngày thì coi là cũ. */
+export function describeLibrary(file: Pick<AudioLibraryFile, 'sourceUpdatedOn' | 'tracks'>, today: Date): { label: string; isStale: boolean } {
+  const count = `${file.tracks.length.toLocaleString('vi-VN')} bài`;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(file.sourceUpdatedOn ?? '');
+  const updated = match ? Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : Number.NaN;
+  if (!match || Number.isNaN(updated)) {
+    return { label: `Thư viện chưa rõ ngày cập nhật · ${count}`, isStale: true };
+  }
+  const days = Math.floor((Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()) - updated) / 86_400_000);
+  const isStale = days > LIBRARY_STALE_AFTER_DAYS;
+  return { label: `Thư viện cập nhật ${match[3]}/${match[2]}/${match[1]} · ${isStale ? `đã ${days} ngày, cần cập nhật` : count}`, isStale };
 }
 
 export function isAudioLibraryFile(value: unknown): value is AudioLibraryFile {

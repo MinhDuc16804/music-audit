@@ -34,3 +34,9 @@ export function parseYoutubeVideoId(link: string): string {
 export function getVideoUrl(videoId: string): string {
   return `https://www.youtube.com/watch?v=${videoId}`;
 }
+
+/** Link mở video đúng giây đó. Trả về chuỗi rỗng nếu không phải link video, ví dụ tên file tải lên. */
+export function getVideoTimeUrl(link: string, seconds: number): string {
+  const videoId = parseYoutubeVideoId(link);
+  return videoId ? `${getVideoUrl(videoId)}&t=${Math.max(0, Math.floor(seconds))}s` : '';
+}

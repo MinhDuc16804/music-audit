@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { appendUsage, createDailyLimiter, getUserEmail, parseDailyLimit } from './usageLimit.ts';
+import { appendUsage, createDailyLimiter, getLimitDay, getUserEmail, parseDailyLimit } from './usageLimit.ts';
 
 describe('getUserEmail', () => {
   it('đọc email từ Cloudflare Access và chuẩn hóa', () => {
@@ -24,6 +24,13 @@ describe('parseDailyLimit', () => {
     for (const value of [undefined, '', ' ', 'abc', '-1', '1.5']) {
       expect(parseDailyLimit(value)).toBe(30);
     }
+  });
+});
+
+describe('getLimitDay', () => {
+  it('đổi ngày lúc nửa đêm giờ Việt Nam', () => {
+    expect(getLimitDay(new Date('2026-11-07T16:59:59Z'))).toBe('2026-11-07');
+    expect(getLimitDay(new Date('2026-11-07T17:00:00Z'))).toBe('2026-11-08');
   });
 });
 

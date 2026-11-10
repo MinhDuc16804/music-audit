@@ -219,6 +219,17 @@ class AuddCommandTests(unittest.TestCase):
         self.assertEqual(len(FakeAudd.bodies), 1)
         self.assertEqual(again["duration_seconds"], 125)
 
+    def test_output_says_when_result_is_reused_and_rescan_sends_again(self):
+        env = self._fake_yt_dlp(FAKE_YT_DLP)
+        first = json.loads(self._run("identify", "https://youtu.be/song1234567", "--extract", extra_env=env).stdout)
+        again = json.loads(self._run("identify", "https://youtu.be/song1234567", "--extract", extra_env=env).stdout)
+        self.assertFalse(first["cached"])
+        self.assertTrue(again["cached"])
+        self.assertRegex(again["scanned_at"], r"^\d{4}-\d{2}-\d{2}T")
+        rescan = json.loads(self._run("identify", "https://youtu.be/song1234567", "--extract", "--rescan", extra_env=env).stdout)
+        self.assertFalse(rescan["cached"])
+        self.assertEqual(len(FakeAudd.bodies), 2)
+
     def test_failed_extract_is_friendly_and_not_billed(self):
         env = self._fake_yt_dlp(FAKE_YT_DLP_PRIVATE)
         done = self._run("identify", "https://youtu.be/song1234567", "--extract", extra_env=env)

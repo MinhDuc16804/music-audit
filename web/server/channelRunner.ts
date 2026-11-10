@@ -10,10 +10,21 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { buildChannelGate, parseProgress, pickToSend } from '../src/channelScan.ts';
-import type { ChannelCurrentResponse, ChannelOptions, ChannelReport, ChannelScan, ChannelScanView, ChannelStatus, ChannelVideo } from '../src/channelScan.ts';
+import type {
+  ChannelCurrentResponse,
+  ChannelHistoryItem,
+  ChannelOptions,
+  ChannelReport,
+  ChannelScan,
+  ChannelScanView,
+  ChannelStatus,
+  ChannelVideo,
+} from '../src/channelScan.ts';
 
 export const CHANNEL_ROUTE = '/api/channel-scans';
 const DEFAULT_MAX_REQUESTS = 5000;
+/** Số lần quét đã xong được giữ lại để mở lại báo cáo. Vượt thì bỏ lần cũ nhất. */
+const MAX_STORED_DONE = 100;
 /** Khớp câu báo trong audit.py. */
 const ACCOUNT_ERROR_TEXT = 'lỗi tài khoản AudD';
 const VIDEO_ERROR_PREFIX = 'Lỗi với ';
@@ -25,6 +36,7 @@ const RUNNING_STATUSES = new Set<ChannelStatus>(['downloading', 'filtering', 'id
 export type ChannelRoute =
   | { action: 'current' }
   | { action: 'requirements' }
+  | { action: 'history' }
   | { action: 'create' }
   | { action: 'report'; scanId: string }
   | { action: 'start'; scanId: string }
@@ -41,7 +53,7 @@ export function matchChannelRoute(method: string | undefined, pathname: string):
   }
   const parts = pathname.slice(CHANNEL_ROUTE.length).split('/').filter(Boolean);
   if (method === 'GET') {
-    if (parts.length === 1 && (parts[0] === 'current' || parts[0] === 'requirements')) {
+    if (parts.length === 1 && (parts[0] === 'current' || parts[0] === 'requirements' || parts[0] === 'history')) {
       return { action: parts[0] };
     }
     return parts.length === 2 && parts[1] === 'report' ? { action: 'report', scanId: parts[0] } : null;
@@ -87,7 +99,8 @@ export interface ChannelRunnerDeps {
   runQueued: (workdir: string, args: string[]) => Promise<string>;
   readJson: (workdir: string, args: string[]) => Promise<unknown>;
   removeAudio: (workdir: string) => Promise<void>;
-  logUsage: (user: string, target: string, outcome: 'done' | 'error') => Promise<void>;
+  /** scanId được ghi kèm để tab Lịch sử quét mở lại đúng báo cáo. */
+  logUsage: (user: string, target: string, outcome: 'done' | 'error', scanId: string) => Promise<void>;
   maxRequests: number;
 }
 
@@ -170,6 +183,8 @@ export function createChannelRunner(deps: ChannelRunnerDeps) {
     scan.status = 'done';
     scan.stoppedEarly = stoppedEarly;
     scan.pendingIds = [];
+    // Báo cáo đọc từ thư mục của kênh, nên không cần giữ danh sách video trong file trạng thái.
+    scan.videos = [];
     delete scan.pauseReason;
     delete scan.pausedFrom;
     delete scan.gate;
@@ -286,7 +301,10 @@ export function createChannelRunner(deps: ChannelRunnerDeps) {
         if (status.videos.length === 0) {
           throw new ChannelError(404, 'Kênh này không có video công khai nào.');
         }
-        scans = scans.filter((scan) => scan.user !== user);
+        // Giữ các lần đã xong để mở lại báo cáo, chỉ bỏ lần mới lấy danh sách mà chưa quét của người này.
+        scans = scans.filter((scan) => scan.user !== user || scan.status === 'done');
+        let extra = scans.filter(({ status }) => status === 'done').length - MAX_STORED_DONE;
+        scans = scans.filter(({ status }) => status !== 'done' || extra-- <= 0);
         scans.push({
           id: randomUUID(),
           user,
@@ -334,7 +352,8 @@ export function createChannelRunner(deps: ChannelRunnerDeps) {
         throw new ChannelError(409, `Lần quét cần ${scan.gate.requests} yêu cầu AudD, vượt trần ${deps.maxRequests}.`);
       }
       requireIdle();
-      await deps.logUsage(user, `${scan.channelUrl} (${scan.gate.videos} video, ${scan.gate.requests} yêu cầu)`, 'done');
+      await deps.logUsage(user, `${scan.channelUrl} (${scan.gate.videos} video, ${scan.gate.requests} yêu cầu)`, 'done', scan.id);
+      scan.sent = { videos: scan.gate.videos, requests: scan.gate.requests };
       scan.status = 'identifying';
       scan.progress = { done: 0, total: scan.pendingIds.length };
       await persist();
@@ -378,9 +397,22 @@ export function createChannelRunner(deps: ChannelRunnerDeps) {
       await finish(scan, true);
     },
 
-    async report(user: string, scanId: string): Promise<ChannelReport> {
+    /** Các lần quét đã kết thúc của mọi người, mới nhất trước. */
+    async history(): Promise<ChannelHistoryItem[]> {
       await ready();
-      const scan = findOwn(user, scanId);
+      return scans
+        .filter(({ status }) => status === 'done')
+        .map(({ id, user, channelUrl, channelTitle, createdAt, stoppedEarly, failed, sent }) => ({ id, user, channelUrl, channelTitle, createdAt, stoppedEarly, failed, ...(sent ? { sent } : {}) }))
+        .reverse();
+    },
+
+    /** Mọi người đều xem được báo cáo của nhau, giống tab Lịch sử quét. Báo cáo đọc từ kết quả đã lưu, không gửi gì cho AudD. */
+    async report(scanId: string): Promise<ChannelReport> {
+      await ready();
+      const scan = scans.find(({ id }) => id === scanId);
+      if (!scan) {
+        throw new ChannelError(404, 'Không còn thấy lần quét này nên không mở được báo cáo.');
+      }
       if (scan.status !== 'done') {
         throw new ChannelError(409, 'Lần quét chưa xong.');
       }

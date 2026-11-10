@@ -712,7 +712,15 @@ def youtube_duration(video_id):
         return 0
 
 
-def _audd_output(source, source_id, raw, limit, duration=0):
+def _cache_time(cache):
+    """Thời điểm kết quả được lưu, tức lúc AudD quét. Chuỗi rỗng nếu không có file."""
+    if cache is None or not cache.is_file():
+        return ""
+    return datetime.fromtimestamp(cache.stat().st_mtime, timezone.utc).isoformat(timespec="seconds")
+
+
+def _audd_output(source, source_id, raw, limit, duration=0, cache=None, cached=False):
+    """cached cho web app biết đây là kết quả cũ lấy lại, để hiện nút Quét lại."""
     minutes = limit * CHUNK_SECONDS // 60
     return {
         "url": source,
@@ -723,11 +731,13 @@ def _audd_output(source, source_id, raw, limit, duration=0):
         **identify_summary(parse_audd(raw)),
         "duration_seconds": duration,
         "max_seconds": limit * CHUNK_SECONDS,
+        "cached": cached,
+        "scanned_at": _cache_time(cache),
     }
 
 
-def _print_audd_result(source, source_id, raw, limit, duration=0):
-    print(json.dumps(_audd_output(source, source_id, raw, limit, duration), ensure_ascii=False, indent=2))
+def _print_audd_result(source, source_id, raw, limit, duration=0, cache=None, cached=False):
+    print(json.dumps(_audd_output(source, source_id, raw, limit, duration, cache, cached), ensure_ascii=False, indent=2))
 
 
 HISTORY_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
@@ -763,7 +773,7 @@ def cmd_history(args, paths):
         if raw is None:
             continue
         source = video_url(key) if is_video else ""
-        results[key] = {**_audd_output(source, key, raw, limit, raw.get("duration_seconds") or 0), "title": titles.get(key, "")}
+        results[key] = {**_audd_output(source, key, raw, limit, raw.get("duration_seconds") or 0, cache, True), "title": titles.get(key, "")}
     print(json.dumps(results, ensure_ascii=False))
 
 
@@ -771,10 +781,11 @@ def _identify_with_audd(args, paths, video_id, url):
     cache = paths.audd / f"{video_id}.json"
     limit = audd_max_chunks()
     raw = None if args.rescan else read_json(cache, None)
+    cached = raw is not None
     if raw is None:
         raw = audd_client().recognize_url(url, limit)
         write_json(cache, raw)
-    _print_audd_result(url, video_id, raw, limit, youtube_duration(video_id))
+    _print_audd_result(url, video_id, raw, limit, youtube_duration(video_id), cache, cached)
 
 
 def _identify_with_extraction(args, paths, video_id, url):
@@ -782,6 +793,7 @@ def _identify_with_extraction(args, paths, video_id, url):
     cache = paths.audd / f"{video_id}.json"
     limit = audd_max_chunks()
     raw = None if args.rescan else read_json(cache, None)
+    cached = raw is not None
     if raw is None:
         client = audd_client()
         with tempfile.TemporaryDirectory() as folder:
@@ -789,7 +801,7 @@ def _identify_with_extraction(args, paths, video_id, url):
             raw = client.recognize_file(audio.path, limit)
         raw["duration_seconds"] = audio.duration
         write_json(cache, raw)
-    _print_audd_result(url, video_id, raw, limit, raw.get("duration_seconds") or youtube_duration(video_id))
+    _print_audd_result(url, video_id, raw, limit, raw.get("duration_seconds") or youtube_duration(video_id), cache, cached)
 
 
 def _file_digest(path):
@@ -808,10 +820,11 @@ def cmd_identify_file(args, paths):
     cache = paths.audd / f"file-{digest}.json"
     limit = audd_max_chunks()
     raw = None if args.rescan else read_json(cache, None)
+    cached = raw is not None
     if raw is None:
         raw = audd_client().recognize_file(path, limit)
         write_json(cache, raw)
-    _print_audd_result(args.name or path.name, digest[:11], raw, limit)
+    _print_audd_result(args.name or path.name, digest[:11], raw, limit, cache=cache, cached=cached)
 
 
 def cmd_identify(args, paths):

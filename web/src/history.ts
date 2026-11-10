@@ -13,6 +13,7 @@ export const HISTORY_KINDS: HistoryKind[] = ['link', 'file', 'batch', 'channel']
 export const UNKNOWN_USER = 'khong-ro';
 const MAX_ENTRIES = 1000;
 const RESULT_KEY = /^[A-Za-z0-9_-]{11}$/;
+const SCAN_ID = /^[0-9a-f-]{36}$/;
 
 export type HistoryResult = IdentifyResult & { title?: string };
 
@@ -26,6 +27,10 @@ export interface HistoryEntry {
   /** Mã để tìm kết quả đã lưu: mã video, hoặc 11 ký tự đầu mã băm của file. */
   resultKey?: string;
   channel?: { url: string; videos: number; requests: number };
+  /** Mã lần quét kênh, để mở lại báo cáo. Các lần quét cũ không có. */
+  scanId?: string;
+  /** Lượt này là bấm Quét lại. */
+  rescan?: boolean;
   result?: HistoryResult;
 }
 
@@ -49,13 +54,19 @@ export function parseUsageLog(text: string): HistoryEntry[] {
     } catch {
       return;
     }
-    const { time, user, kind, target, outcome, resultId } = row;
+    const { time, user, kind, target, outcome, resultId, rescan } = row;
     if (typeof time !== 'string' || typeof target !== 'string' || !HISTORY_KINDS.includes(kind as HistoryKind) || (outcome !== 'done' && outcome !== 'error')) {
       return;
     }
     const entry: HistoryEntry = { id: String(position), time, user: typeof user === 'string' && user ? user : UNKNOWN_USER, kind: kind as HistoryKind, target, outcome };
+    if (rescan === true) {
+      entry.rescan = true;
+    }
     if (entry.kind === 'channel') {
       entry.channel = parseChannelTarget(target);
+      if (typeof resultId === 'string' && SCAN_ID.test(resultId)) {
+        entry.scanId = resultId;
+      }
     } else {
       const key = entry.kind === 'file' ? resultId : parseYoutubeVideoId(target);
       if (typeof key === 'string' && RESULT_KEY.test(key)) {

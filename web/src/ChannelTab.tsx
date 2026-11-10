@@ -17,6 +17,8 @@ import {
 } from './channelScan';
 import type {
   ChannelCurrentResponse,
+  ChannelHistoryItem,
+  ChannelHistoryResponse,
   ChannelOptions,
   ChannelReport,
   ChannelReportVideo,
@@ -26,6 +28,8 @@ import type {
   ChannelVideo,
 } from './channelScan';
 import { IconBadge, Panel, SoundBars } from './components';
+import { NotifySwitch, useScanNotice } from './NotifySwitch';
+import { describeChannelChange } from './scanNotice';
 
 const API = '/api/channel-scans';
 const POLL_INTERVAL_MS = 3000;
@@ -206,7 +210,8 @@ function ReportRow({ video }: { video: ChannelReportVideo }) {
   );
 }
 
-function ChannelResult({ scan }: { scan: ChannelScanView }) {
+/** Báo cáo của một lần quét đã xong. Chỉ đọc kết quả đã lưu, không gửi gì cho AudD. */
+export function ChannelResult({ scan }: { scan: Pick<ChannelScanView, 'id' | 'createdAt'> }) {
   const [report, setReport] = useState<ChannelReport | null>(null);
   const [error, setError] = useState('');
   const [view, setView] = useState<'videos' | 'songs'>('videos');
@@ -462,6 +467,83 @@ function VideoList({ videos, options, maxSeconds }: { videos: ChannelVideo[]; op
   );
 }
 
+const formatScanTime = (value: string) =>
+  new Date(value).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+/** Các lần quét đã kết thúc của mọi người. Mở lại báo cáo không cần lấy lại danh sách video và không tốn lượt. */
+function PastScans({ refreshKey, hiddenId }: { refreshKey: string; hiddenId?: string }) {
+  const [items, setItems] = useState<ChannelHistoryItem[]>([]);
+  const [openId, setOpenId] = useState('');
+
+  useEffect(() => {
+    let isCancelled = false;
+    fetch(`${API}/history`)
+      .then((response) => readResponse<ChannelHistoryResponse>(response))
+      .then(({ scans }) => {
+        if (!isCancelled) {
+          setItems(scans);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      isCancelled = true;
+    };
+  }, [refreshKey]);
+
+  const shown = items.filter(({ id }) => id !== hiddenId);
+  const open = shown.find(({ id }) => id === openId);
+  if (shown.length === 0) {
+    return null;
+  }
+
+  return (
+    <>
+      <Panel className="overflow-hidden">
+        <h3 className="border-b border-brand-100 px-5 py-3 text-sm font-semibold text-slate-900">Các lần quét trước</h3>
+        <ul className="divide-y divide-slate-100">
+          {shown.map((item) => (
+            <li key={item.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-5 py-3 text-sm">
+              <div className="min-w-0 flex-[1_1_16rem]">
+                <a href={item.channelUrl} target="_blank" rel="noreferrer" className="wrap-anywhere font-medium text-slate-800 hover:underline">
+                  {item.channelTitle || item.channelUrl}
+                </a>
+                <p className="text-xs text-slate-500 tabular-nums">
+                  {[
+                    formatScanTime(item.createdAt),
+                    item.user === 'khong-ro' ? '' : item.user,
+                    item.sent ? `${number(item.sent.videos)} video đã gửi · ${number(item.sent.requests)} yêu cầu AudD` : 'Chưa gửi AudD',
+                    item.failed ? `${number(item.failed)} video lỗi` : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </p>
+              </div>
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                <span className={`${PILL} ${item.stoppedEarly ? PILL_GREY : 'bg-brand-50 text-brand-800 ring-brand-200'}`}>{item.stoppedEarly ? 'Dừng sớm' : 'Đã xong'}</span>
+                <button type="button" aria-expanded={openId === item.id} onClick={() => setOpenId(openId === item.id ? '' : item.id)} className={SMALL_BUTTON}>
+                  {openId === item.id ? 'Đóng báo cáo' : 'Mở báo cáo'}
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+        <p className="flex gap-2 border-t border-slate-100 px-5 py-3 text-xs text-slate-500">
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          Báo cáo đọc từ kết quả đã lưu của kênh, nên nếu kênh được quét thêm sau đó thì báo cáo cũ gồm cả video mới quét.
+        </p>
+      </Panel>
+      {open && (
+        <div className="grid min-w-0 gap-2">
+          <p className="text-sm font-semibold text-slate-900">
+            Báo cáo: {open.channelTitle || open.channelUrl} · {formatScanTime(open.createdAt)}
+          </p>
+          <ChannelResult key={open.id} scan={open} />
+        </div>
+      )}
+    </>
+  );
+}
+
 function RunPanel({
   scan,
   maxRequests,
@@ -584,6 +666,7 @@ export function ChannelTab() {
 
   const scan = isNew ? null : (state?.scan ?? null);
   const status = scan?.status;
+  useScanNotice(state?.scan ?? null, ({ id, status: seen }) => ({ id, status: seen }), describeChannelChange);
 
   // Danh sách có thể nằm dưới cột cấu hình, nên cuộn tới để người dùng thấy kết quả của nút vừa bấm.
   useEffect(() => {
@@ -785,6 +868,7 @@ export function ChannelTab() {
           </>
         )}
 
+        <NotifySwitch id="channel-notify" />
         {isMissing && <p className="text-xs text-rose-700">Chưa quét được vì máy chủ còn thiếu: {lacking.join(', ')}.</p>}
         {message && <p className="text-xs text-rose-700">{message}</p>}
       </Panel>
@@ -809,6 +893,7 @@ export function ChannelTab() {
           </div>
         )}
         {scan?.status === 'done' && <ChannelResult key={scan.id} scan={scan} />}
+        <PastScans refreshKey={`${scan?.id ?? ''}-${status ?? ''}`} hiddenId={scan?.status === 'done' ? scan.id : undefined} />
       </div>
     </div>
   );

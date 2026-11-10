@@ -61,8 +61,26 @@ export interface ChannelScan {
   gate?: ChannelGate;
   failed: number;
   stoppedEarly: boolean;
+  /** Số video và số yêu cầu AudD đã được xác nhận gửi, để xem lại trong danh sách các lần quét trước. */
+  sent?: { videos: number; requests: number };
   videos: ChannelVideo[];
   pendingIds: string[];
+}
+
+/** Một lần quét đã kết thúc, đủ để liệt kê và mở lại báo cáo. */
+export interface ChannelHistoryItem {
+  id: string;
+  user: string;
+  channelUrl: string;
+  channelTitle: string;
+  createdAt: string;
+  stoppedEarly: boolean;
+  failed: number;
+  sent?: { videos: number; requests: number };
+}
+
+export interface ChannelHistoryResponse {
+  scans: ChannelHistoryItem[];
 }
 
 /** Bản gửi cho trình duyệt: danh sách video chỉ cần khi đang chọn cách quét. */

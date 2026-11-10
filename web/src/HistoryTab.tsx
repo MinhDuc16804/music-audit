@@ -2,11 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { Download, Info, LoaderCircle, RefreshCw, Search } from 'lucide-react';
 import type { AudioLibraryIndex } from './audioLibrary';
 import { formatDuration } from './batchScan';
+import { ChannelResult } from './ChannelTab';
 import { Panel, TrackList } from './components';
 import { buildHistoryCsv, filterHistory, historyTitle, UNKNOWN_USER } from './history';
 import type { HistoryEntry, HistoryKind, HistoryResponse } from './history';
+import { RescanControl } from './RescanControl';
+import { requestIdentify } from './scanJob';
 import { getVideoVerdict } from './videoCheck';
 import type { VideoVerdict, VideoVerdictKind } from './videoCheck';
+import { parseYoutubeVideoId } from './youtubeLink';
 
 const API = '/api/history';
 const PAGE_SIZE = 10;
@@ -51,8 +55,9 @@ function personLabel(user: string, me: string): string {
   return user === me ? 'Bạn' : user;
 }
 
-function HistoryRow({ entry, verdict, me }: { entry: HistoryEntry; verdict?: VideoVerdict; me: string }) {
+function HistoryRow({ entry, verdict, me, onRescanned }: { entry: HistoryEntry; verdict?: VideoVerdict; me: string; onRescanned: () => void }) {
   const [isOpen, setIsOpen] = useState(false);
+  const [isReportOpen, setIsReportOpen] = useState(false);
   const time = timeParts(entry.time);
   const status = statusOf(entry, verdict);
   const duration = entry.result?.duration_seconds ?? 0;
@@ -62,6 +67,8 @@ function HistoryRow({ entry, verdict, me }: { entry: HistoryEntry; verdict?: Vid
     verdict?.tracks.length ? `${verdict.tracks.length} bài nhận ra` : '',
   ].filter(Boolean).join(' · ');
   const link = entry.kind === 'file' ? '' : entry.channel?.url ?? entry.result?.url ?? entry.target;
+  // File tải lên không quét lại được từ đây vì server không giữ file, phải tải lên lại ở tab Kiểm tra nhạc.
+  const rescanUrl = entry.kind !== 'file' && entry.result?.status === 'done' && parseYoutubeVideoId(entry.result.url) ? entry.result.url : '';
 
   return (
     <li className="px-5 py-3">
@@ -77,6 +84,7 @@ function HistoryRow({ entry, verdict, me }: { entry: HistoryEntry; verdict?: Vid
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           <span className="rounded-md bg-brand-50 px-2 py-0.5 text-[11px] font-semibold text-brand-800">{KIND_LABELS[entry.kind]}</span>
+          {entry.rescan && <span className="rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">Quét lại</span>}
           <span className={`${PILL} ${status.pill}`}>{status.label}</span>
           <button type="button" aria-expanded={isOpen} onClick={() => setIsOpen(!isOpen)} className={SMALL_BUTTON}>
             {isOpen ? 'Thu gọn' : 'Chi tiết'}
@@ -89,12 +97,21 @@ function HistoryRow({ entry, verdict, me }: { entry: HistoryEntry; verdict?: Vid
             {verdict
               ? verdict.detail
               : entry.kind === 'channel'
-                ? 'Lần quét kênh này đã được xác nhận chi phí. Báo cáo chi tiết xem trong tab Quét cả kênh khi mở lại kênh.'
+                ? entry.scanId
+                  ? 'Lần quét kênh này đã được xác nhận chi phí. Mở báo cáo để xem lại, không tốn lượt AudD.'
+                  : 'Lần quét kênh này đã được xác nhận chi phí. Lần quét có từ trước khi app lưu báo cáo, nên hãy lấy lại danh sách kênh ở tab Quét cả kênh để xem.'
                 : entry.outcome === 'error'
                   ? 'Lần quét này bị lỗi nên không có kết quả. Quét lại ở tab Kiểm tra nhạc.'
                   : 'Không còn tìm thấy kết quả đã lưu của lần quét này.'}
           </p>
-          {verdict && verdict.tracks.length > 0 && <TrackList tracks={verdict.tracks} />}
+          {verdict && verdict.tracks.length > 0 && <TrackList tracks={verdict.tracks} videoUrl={entry.result?.url} durationSeconds={duration} />}
+          {entry.scanId && (
+            <button type="button" aria-expanded={isReportOpen} onClick={() => setIsReportOpen(!isReportOpen)} className={`${SMALL_BUTTON} w-fit`}>
+              {isReportOpen ? 'Đóng báo cáo' : 'Mở báo cáo'}
+            </button>
+          )}
+          {entry.scanId && isReportOpen && <ChannelResult scan={{ id: entry.scanId, createdAt: entry.time }} />}
+          {rescanUrl && entry.result && <RescanControl result={entry.result} start={(isCurrent) => requestIdentify(rescanUrl, isCurrent, true)} onDone={onRescanned} />}
           {link && (
             <a href={link} target="_blank" rel="noreferrer" className="w-fit text-xs font-medium text-brand-700 hover:underline">
               {entry.kind === 'channel' ? 'Mở kênh' : 'Mở video'}
@@ -261,7 +278,7 @@ export function HistoryTab({ libraryIndex, isActive }: { libraryIndex: AudioLibr
 
       <ul className="divide-y divide-slate-100 border-y border-slate-100">
         {shown.slice(start, start + PAGE_SIZE).map(({ entry, verdict }) => (
-          <HistoryRow key={entry.id} entry={entry} verdict={verdict} me={me} />
+          <HistoryRow key={entry.id} entry={entry} verdict={verdict} me={me} onRescanned={load} />
         ))}
         {shown.length === 0 && (
           <li className="px-5 py-8 text-center text-sm text-slate-500">

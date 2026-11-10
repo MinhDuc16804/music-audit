@@ -15,6 +15,7 @@ import { CHANNEL_ROUTE } from './channelRunner.ts';
 import { createHandlers, FILE_ROUTE, ROUTE } from './identifyPlugin.ts';
 import { HISTORY_ROUTE } from './history.ts';
 import { QUOTA_ROUTE } from './quota.ts';
+import { JOB_ROUTE } from './scanJobs.ts';
 import { getContentType, resolveStaticPath } from './staticFiles.ts';
 
 const APP_ROOT = resolve(import.meta.dirname, '..');
@@ -26,7 +27,7 @@ const HEALTH_ROUTE = '/api/health';
 // Tải lên file lớn qua mạng chậm có thể mất nhiều phút.
 const UPLOAD_TIMEOUT_MS = 15 * 60_000;
 
-const { handleLink, handleFile, handleBatch, handleChannel, handleQuota, handleHistory, startBatches } = createHandlers(() => AUDIT_ROOT);
+const { handleLink, handleFile, handleJob, handleBatch, handleChannel, handleQuota, handleHistory, startBatches } = createHandlers(() => AUDIT_ROOT);
 
 async function sendStaticFile(request: IncomingMessage, response: ServerResponse, pathname: string) {
   if (request.method !== 'GET' && request.method !== 'HEAD') {
@@ -60,6 +61,8 @@ const server = createServer((request, response) => {
     void handleFile(request, response);
   } else if (pathname === ROUTE) {
     void handleLink(request, response);
+  } else if (pathname.startsWith(`${JOB_ROUTE}/`)) {
+    handleJob(request, response);
   } else if (pathname === BATCH_ROUTE || pathname.startsWith(`${BATCH_ROUTE}/`)) {
     void handleBatch(request, response);
   } else if (pathname === CHANNEL_ROUTE || pathname.startsWith(`${CHANNEL_ROUTE}/`)) {

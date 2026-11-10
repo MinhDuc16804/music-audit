@@ -5,6 +5,8 @@ import type { AudioLibraryIndex } from './audioLibrary';
 import { buildBatchCsv, estimateAuddRequests, formatDuration, MAX_BATCH_VIDEOS, parseBatchLinks } from './batchScan';
 import type { Batch, BatchCurrentResponse, BatchEstimateResponse, BatchItem } from './batchScan';
 import { IconBadge, Panel, SoundBars, TrackList } from './components';
+import { NotifySwitch, useScanNotice } from './NotifySwitch';
+import { describeBatchChange } from './scanNotice';
 import { getVideoVerdict } from './videoCheck';
 import type { VideoVerdict, VideoVerdictKind } from './videoCheck';
 
@@ -148,7 +150,7 @@ function BatchRow({ item, verdict, onRetry }: { item: BatchItem; verdict?: Video
           <p className="text-sm text-slate-600">{verdict.detail}</p>
           {verdict.tracks.length > 0 && (
             <div className="mt-2">
-              <TrackList tracks={verdict.tracks} />
+              <TrackList tracks={verdict.tracks} videoUrl={item.url} durationSeconds={item.result?.duration_seconds} />
             </div>
           )}
         </div>
@@ -312,6 +314,7 @@ export function BatchTab({ libraryIndex, isLibraryReady }: { libraryIndex: Audio
   const idsKey = parsed.videoIds.join(',');
   const batch = state?.batch ?? null;
   const isBatchActive = batch !== null && batch.status !== 'done';
+  useScanNotice(batch, ({ id, status }) => ({ id, status }), describeBatchChange);
 
   useEffect(() => {
     let isCancelled = false;
@@ -416,6 +419,9 @@ export function BatchTab({ libraryIndex, isLibraryReady }: { libraryIndex: Audio
             </div>
             {skipped && <p className="mt-2 text-xs text-amber-800">{skipped}</p>}
             {problem && <p className="mt-2 text-xs text-rose-700">{problem}</p>}
+            <div className="mt-3">
+              <NotifySwitch id="batch-notify" />
+            </div>
             {message && <p className="mt-2 text-xs text-rose-700">{message}</p>}
           </div>
 

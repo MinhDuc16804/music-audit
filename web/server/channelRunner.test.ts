@@ -63,6 +63,7 @@ describe('matchChannelRoute', () => {
   it('nhận đúng các đường dẫn', () => {
     expect(matchChannelRoute('GET', '/api/channel-scans/current')).toEqual({ action: 'current' });
     expect(matchChannelRoute('GET', '/api/channel-scans/x/report')).toEqual({ action: 'report', scanId: 'x' });
+    expect(matchChannelRoute('GET', '/api/channel-scans/history')).toEqual({ action: 'history' });
     expect(matchChannelRoute('POST', '/api/channel-scans')).toEqual({ action: 'create' });
     expect(matchChannelRoute('POST', '/api/channel-scans/x/send')).toEqual({ action: 'send', scanId: 'x' });
   });
@@ -130,7 +131,7 @@ describe('createChannelRunner', () => {
     const done = await waitForStatus(runner, 'done');
     expect(deps.runQueued.mock.calls.map(([, args]) => args[3])).toEqual(['a', 'b']);
     expect(deps.runQueued.mock.calls[0][1]).toEqual(['submit', '--all-videos', '--video-id', 'a', '--delay', '0']);
-    expect(deps.logUsage).toHaveBeenCalledWith(USER, `${CHANNEL.url} (2 video, 10 yêu cầu)`, 'done');
+    expect(deps.logUsage).toHaveBeenCalledWith(USER, `${CHANNEL.url} (2 video, 10 yêu cầu)`, 'done', done.id);
     expect(deps.removeAudio).toHaveBeenCalledTimes(1);
     expect(done.stoppedEarly).toBe(false);
     expect(done.progress).toEqual({ done: 2, total: 2 });
@@ -243,8 +244,39 @@ describe('createChannelRunner', () => {
     const done = await waitForStatus(runner, 'done');
     expect(done.stoppedEarly).toBe(true);
     expect(deps.runQueued).not.toHaveBeenCalled();
-    await runner.report(USER, scan.id);
+    await runner.report(scan.id);
     expect(deps.readJson).toHaveBeenLastCalledWith(join(folder, '@kenh'), ['channel-report']);
+  });
+
+  it('lần quét đã xong nằm trong danh sách các lần quét trước, ai cũng mở được báo cáo', async () => {
+    const { deps, runner } = setup();
+    const scan = await startedAtGate(runner);
+    expect(await runner.history()).toEqual([]);
+    await runner.send(USER, scan.id);
+    await waitForStatus(runner, 'done');
+    expect(await runner.history()).toEqual([
+      expect.objectContaining({ id: scan.id, user: USER, channelUrl: CHANNEL.url, channelTitle: 'Kênh', stoppedEarly: false, sent: { videos: 2, requests: 10 } }),
+    ]);
+    expect((await runner.current('khac@example.com')).scan).toBeNull();
+    await runner.report(scan.id);
+    expect(deps.readJson).toHaveBeenLastCalledWith(join(folder, '@kenh'), ['channel-report']);
+    await expect(runner.report('khong-co')).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('quét kênh mới vẫn giữ lần đã xong, mới nhất đứng trước', async () => {
+    const { runner } = setup();
+    const first = await startedAtGate(runner);
+    await runner.stop(USER, first.id);
+    await waitForStatus(runner, 'done');
+    await runner.create(USER, { url: 'https://www.youtube.com/@khac', key: '@khac' }, false);
+    const second = await waitForStatus(runner, 'ready');
+    expect((await runner.history()).map(({ id }) => id)).toEqual([first.id]);
+    await runner.start(USER, second.id, NO_FILTER);
+    await waitForStatus(runner, 'awaiting');
+    await runner.stop(USER, second.id);
+    await waitForStatus(runner, 'done');
+    expect((await runner.history()).map(({ id }) => id)).toEqual([second.id, first.id]);
+    await runner.report(first.id);
   });
 
   it('người khác không thấy và không điều khiển được lần quét', async () => {
@@ -252,7 +284,8 @@ describe('createChannelRunner', () => {
     const scan = await startedAtGate(runner);
     expect((await runner.current('khac@example.com')).scan).toBeNull();
     await expect(runner.send('khac@example.com', scan.id)).rejects.toMatchObject({ status: 404 });
-    await expect(runner.report('khac@example.com', scan.id)).rejects.toMatchObject({ status: 404 });
+    await expect(runner.stop('khac@example.com', scan.id)).rejects.toMatchObject({ status: 404 });
+    await expect(runner.report(scan.id)).rejects.toMatchObject({ status: 409 });
   });
 
   it('mỗi người chỉ có một lần quét dở, và máy chủ chỉ chạy một kênh một lúc', async () => {

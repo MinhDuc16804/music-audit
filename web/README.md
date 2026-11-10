@@ -65,7 +65,12 @@ nên app giới hạn file tải lên ở 95 MB. File lớn hơn thì xuất ri�
 
 Trên VPS, dữ liệu quét trong `out/` nằm ở nhà cung cấp ngoài công ty, và YouTube dễ chặn IP máy chủ hơn, nên quét bằng link có thể không chạy.
 
-Mỗi người có `MAX_SCANS_PER_USER_PER_DAY` lượt quét mỗi ngày, mặc định 30. Màn hình quét một video tính cả lượt lấy lại kết quả cũ, còn quét hàng loạt thì không. Bộ đếm về 0 khi khởi động lại app.
+Mỗi người có `MAX_SCANS_PER_USER_PER_DAY` lượt quét mỗi ngày, mặc định 30. Màn hình quét một video tính cả lượt lấy lại kết quả cũ, còn quét hàng loạt thì không. Quét lỗi thì được hoàn lượt. Bộ đếm về 0 lúc nửa đêm giờ Việt Nam và khi khởi động lại app.
+Màn hình quét một video chạy nền trên server rồi trình duyệt hỏi lại kết quả mỗi 3 giây, nên không bị Cloudflare cắt khi quét lâu. Bấm Dừng chờ thì server vẫn quét nốt, kết quả xem ở tab Lịch sử quét.
+
+Khi kết quả là kết quả cũ, màn hình Kiểm tra nhạc và tab Lịch sử quét ghi ngày quét và có nút **Quét lại**. Nút này luôn hỏi lại kèm số yêu cầu AudD sẽ tốn, tính 1 lượt quét và được ghi `"rescan": true` trong `out/usage.jsonl`. File tải lên chỉ quét lại được ở màn hình Kiểm tra nhạc, vì server không giữ file.
+Mỗi bài nhận ra có thanh vị trí và các mốc thời gian; với link YouTube, bấm mốc để mở video đúng giây đó.
+Công tắc "Báo cho tôi khi quét xong" ở tab Quét hàng loạt và Quét cả kênh hiện thông báo trình duyệt khi lô hoặc kênh xong, tạm dừng hoặc chờ xác nhận chi phí, và đổi tiêu đề tab. Chỉ báo được khi app còn mở ở một tab.
 Mỗi lượt được ghi vào `out/usage.jsonl` gồm thời gian, email, video hoặc tên file và kết quả. Email lấy từ header của Cloudflare Access,
 nên không có Access thì mọi người dùng chung một bộ đếm, tên là `khong-ro`.
 
@@ -99,6 +104,7 @@ Mục Quét cả kênh nhận link kênh có @handle hoặc mã UC…, cần `YO
 - App luôn dừng hỏi trước khi gửi AudD, kèm số video và số yêu cầu chính xác. Tải âm thanh và lọc nhạc không tốn lượt.
 - Mỗi lần quét không dùng `MAX_SCANS_PER_USER_PER_DAY` mà dùng trần `MAX_CHANNEL_SCAN_REQUESTS`, mặc định 5000 yêu cầu. Vượt trần thì không gửi được. Người bấm xác nhận và số yêu cầu được ghi vào `out/usage.jsonl`.
 - Toàn máy chủ chỉ chạy một kênh một lúc, mỗi người chỉ có một lần quét dở. Đóng tab vẫn tiếp tục. App khởi động lại thì lần quét tạm dừng, phải bấm Chạy tiếp vì việc gửi AudD có tính phí.
+- Các lần quét đã xong nằm ở mục Các lần quét trước, giữ tối đa 100 lần, ai cũng mở lại được báo cáo mà không tốn lượt. Báo cáo đọc từ thư mục của kênh, nên gồm cả video quét sau đó. Lần quét có từ trước bản này không mở lại được.
 - Mỗi kênh có thư mục riêng `out/channels/<kênh>/`, dùng lại giữa các lần quét nên video đã quét không tốn lượt. Tùy chọn của lần sau không áp dụng cho video đã quét ở lần trước. File âm thanh bị xóa khi lần quét kết thúc.
 - YouTube chặn tải hoặc AudD báo lỗi tài khoản thì lần quét tạm dừng. Video lỗi riêng lẻ được bỏ qua và nằm ở nhóm Cần nghe lại.
 - Lọc nhạc cần `requirements-detect.txt` và mô hình trong `models/`, xem README của `music-audit`. Thư viện này chưa có bản cho Python 3.15 và cần Windows cho phép nạp file DLL của nó. Thiếu công cụ thì tab báo tên thứ còn thiếu và khóa nút quét. Quét link cần `yt-dlp`.

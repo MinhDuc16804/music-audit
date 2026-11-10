@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { ExternalLink, Music, ShieldAlert, ShieldCheck, ShieldX } from 'lucide-react';
-import { needsStudioLookup } from './videoCheck';
-import type { CheckedTrack } from './videoCheck';
+import { formatDuration } from './batchScan';
+import { needsStudioLookup, SCAN_SEGMENT_SECONDS } from './videoCheck';
+import type { CheckedTrack, TrackRange } from './videoCheck';
+import { getVideoTimeUrl } from './youtubeLink';
 
 /** "UC" không kèm mã kênh: Studio tự chuyển sang kênh của tài khoản đang đăng nhập. */
 const STUDIO_MUSIC_URL = 'https://studio.youtube.com/channel/UC/music';
@@ -65,12 +67,72 @@ function StudioLookupLink({ title }: { title: string }) {
   );
 }
 
-/** Danh sách bài máy nhận ra trong một video, kèm mức khớp với thư viện. */
-export function TrackList({ tracks }: { tracks: CheckedTrack[] }) {
+type TrackTone = 'ok' | 'warn' | 'bad' | 'ignored';
+const TONE_BARS: Record<TrackTone, string> = { ok: 'bg-emerald-500', warn: 'bg-amber-500', bad: 'bg-rose-600', ignored: 'bg-slate-400' };
+const TIME_CHIP = 'rounded-lg border border-brand-200 bg-white px-2 py-0.5 font-medium text-brand-800 tabular-nums';
+
+/** Bài nằm ở đoạn nào của video. Có link video thì mỗi mốc mở YouTube đúng giây đó, file tải lên thì chỉ hiện chữ. */
+function TrackTimeline({ ranges, tone, videoUrl, durationSeconds }: { ranges: TrackRange[]; tone: TrackTone; videoUrl: string; durationSeconds: number }) {
+  if (ranges.length === 0) {
+    return null;
+  }
+  const isSingleHit = ranges.length === 1 && ranges[0].end - ranges[0].start <= SCAN_SEGMENT_SECONDS;
+  const shown = durationSeconds > 0 ? ranges.filter(({ start }) => start < durationSeconds) : [];
+  const endOf = ({ end }: TrackRange) => (durationSeconds > 0 ? Math.min(end, durationSeconds) : end);
+
+  return (
+    <div className="grid gap-1.5">
+      {shown.length > 0 && (
+        <div className="relative h-2 overflow-hidden rounded-full bg-brand-50" aria-hidden="true">
+          {shown.map((range) => (
+            <span
+              key={range.start}
+              className={`absolute inset-y-0 rounded-full ${TONE_BARS[tone]}`}
+              style={{ left: `${(range.start / durationSeconds) * 100}%`, width: `${Math.max(1, ((endOf(range) - range.start) / durationSeconds) * 100)}%` }}
+            />
+          ))}
+        </div>
+      )}
+      <p className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+        {isSingleHit ? 'Khớp một lần tại' : 'Phát tại'}
+        {ranges.map((range) => {
+          const label = range.end - range.start <= SCAN_SEGMENT_SECONDS ? formatDuration(range.start) : `${formatDuration(range.start)} – ${formatDuration(endOf(range))}`;
+          const link = getVideoTimeUrl(videoUrl, range.start);
+          return link ? (
+            <a key={range.start} href={link} target="_blank" rel="noreferrer" title="Mở video ở mốc này" className={`${TIME_CHIP} hover:bg-brand-50`}>
+              {label}
+            </a>
+          ) : (
+            <span key={range.start} className={TIME_CHIP}>
+              {label}
+            </span>
+          );
+        })}
+        {isSingleHit && <span>· chỉ một đoạn {SCAN_SEGMENT_SECONDS} giây, dễ là nhận nhầm</span>}
+      </p>
+    </div>
+  );
+}
+
+function getTrackTone({ libraryTrack, nearTrack, isDoubtful, isIgnored }: CheckedTrack): TrackTone {
+  if (isIgnored) {
+    return 'ignored';
+  }
+  if (nearTrack || isDoubtful || libraryTrack?.unconfirmed) {
+    return 'warn';
+  }
+  return libraryTrack ? 'ok' : 'bad';
+}
+
+/** Danh sách bài máy nhận ra trong một video, kèm mức khớp với thư viện và vị trí trong video. */
+export function TrackList({ tracks, videoUrl = '', durationSeconds = 0 }: { tracks: CheckedTrack[]; videoUrl?: string; durationSeconds?: number }) {
   return (
     <ul className="divide-y divide-slate-100">
-      {tracks.map(({ track, libraryTrack, nearTrack, isDoubtful, isIgnored }) => (
-        <li key={`${track.title}-${track.artists}`} className="flex flex-col gap-2 py-3 md:flex-row md:items-center md:justify-between md:gap-4">
+      {tracks.map((checked) => {
+        const { track, libraryTrack, nearTrack, isDoubtful, isIgnored, ranges = [] } = checked;
+        return (
+        <li key={`${track.title}-${track.artists}`} className="grid gap-2 py-3">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between md:gap-4">
           <div className="flex min-w-0 gap-3 text-sm">
             <IconBadge>
               <Music className="h-4 w-4" />
@@ -124,8 +186,11 @@ export function TrackList({ tracks }: { tracks: CheckedTrack[] }) {
                       ? 'Có trong thư viện'
                       : 'Không có trong thư viện'}
           </span>
+        </div>
+        <TrackTimeline ranges={ranges} tone={getTrackTone(checked)} videoUrl={videoUrl} durationSeconds={durationSeconds} />
         </li>
-      ))}
+        );
+      })}
     </ul>
   );
 }
