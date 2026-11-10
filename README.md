@@ -229,7 +229,9 @@ Máy chủ giả trong `tests/test_flow.py` mô phỏng API theo tài liệu. Kh
 
 | File | Vai trò |
 |---|---|
-| `audit.py` | Các lệnh |
+| `audit.py` | Khai báo các lệnh |
+| `music_audit/commands/` | Phần làm việc của các lệnh, chia theo nhóm: video, gửi quét, nhận diện, báo cáo |
+| `music_audit/workspace.py` | Thư mục dữ liệu, đọc ghi JSON, chọn dịch vụ và khóa |
 | `.claude/skills/identify-music/` | Skill để agent gọi lệnh `identify` |
 | `music_audit/acrcloud.py` | Gọi File Scanning API |
 | `music_audit/audd.py` | Gọi Enterprise API của AudD và đọc kết quả |

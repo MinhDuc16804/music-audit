@@ -19,7 +19,10 @@ Nạp chúng trong `music_audit/detect.py` khi chạy thật, không import ở 
 
 ## Kiến trúc
 
-- `audit.py`: lệnh dòng lệnh. Trạng thái lưu trong `out/` để chạy tiếp được khi bị ngắt.
+- `audit.py`: khai báo các lệnh dòng lệnh. Trạng thái lưu trong `out/` để chạy tiếp được khi bị ngắt.
+- `music_audit/commands/`: phần làm việc của các lệnh, chia theo nhóm: `videos.py` (lấy danh sách, tải âm thanh, lọc nhạc),
+  `scan.py` (submit, fetch, đoạn cắt), `identify.py` (identify, identify-file, history), `report.py` (báo cáo, lệnh JSON cho tab Quét cả kênh).
+- `music_audit/workspace.py`: thư mục `data/`, `out/`, đọc ghi JSON, chọn dịch vụ và khóa, danh sách video.
 - `.claude/skills/identify-music/`: skill để agent gọi lệnh `identify` khi có người dán link YouTube.
 - `music_audit/acrcloud.py`: gọi API ACRCloud. `music_audit/youtube.py`: lấy danh sách video từ YouTube Data API.
 - `music_audit/audd.py`: gọi API AudD cho `identify` và `identify-file`. AudD không phát hiện "không có nhạc", nên không khớp là `hold`.

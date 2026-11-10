@@ -10,6 +10,8 @@ from pathlib import Path
 from unittest import mock
 
 import audit
+from music_audit import workspace
+from music_audit.commands import videos
 from music_audit import extract
 from music_audit.common import write_csv
 from music_audit.extract import BLOCKED_MESSAGE, ExtractError, ExtractStop, build_download_command, download_audio
@@ -31,8 +33,8 @@ class ChannelCommandTestCase(unittest.TestCase):
     def setUp(self):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
-        self.paths = audit.Paths(folder.name)
-        write_csv(self.paths.all_videos, [video(A), video(B), video(C)], audit.VIDEO_COLUMNS)
+        self.paths = workspace.Paths(folder.name)
+        write_csv(self.paths.all_videos, [video(A), video(B), video(C)], videos.VIDEO_COLUMNS)
         env = mock.patch.dict(os.environ, {"MUSIC_SERVICE": "audd", "AUDD_MAX_CHUNKS": ""})
         env.start()
         self.addCleanup(env.stop)
@@ -49,30 +51,30 @@ class ChannelCommandTestCase(unittest.TestCase):
         (self.paths.audio / f"{video_id}.m4a").write_bytes(b"am-thanh")
 
     def mark_scanned(self, video_id):
-        audit.write_json(self.paths.submissions, {url(video_id): {"file_id": "x", "service": "audd", "at": ""}})
+        workspace.write_json(self.paths.submissions, {url(video_id): {"file_id": "x", "service": "audd", "at": ""}})
 
 
 class DownloadAudioCommandTests(ChannelCommandTestCase):
     def test_skips_downloaded_and_scanned_videos(self):
         self.add_audio(A)
         self.mark_scanned(B)
-        with mock.patch("audit.download_audio") as download:
+        with mock.patch("music_audit.commands.videos.download_audio") as download:
             self.run_command("download-audio", "--delay", "0")
         self.assertEqual([call.args[0] for call in download.call_args_list], [url(C)])
 
     def test_limit_only_looks_at_first_videos(self):
-        with mock.patch("audit.download_audio") as download:
+        with mock.patch("music_audit.commands.videos.download_audio") as download:
             self.run_command("download-audio", "--limit", "2", "--delay", "0")
         self.assertEqual([call.args[0] for call in download.call_args_list], [url(A), url(B)])
 
     def test_one_bad_video_does_not_stop_the_rest(self):
-        with mock.patch("audit.download_audio", side_effect=[ExtractError("hỏng"), None, None]) as download:
+        with mock.patch("music_audit.commands.videos.download_audio", side_effect=[ExtractError("hỏng"), None, None]) as download:
             output = self.run_command("download-audio", "--delay", "0")
         self.assertEqual(download.call_count, 3)
         self.assertIn(f"Lỗi với {url(A)}", output)
 
     def test_youtube_block_stops_everything(self):
-        with mock.patch("audit.download_audio", side_effect=ExtractStop(BLOCKED_MESSAGE)) as download:
+        with mock.patch("music_audit.commands.videos.download_audio", side_effect=ExtractStop(BLOCKED_MESSAGE)) as download:
             with self.assertRaises(ExtractStop):
                 self.run_command("download-audio", "--delay", "0")
         self.assertEqual(download.call_count, 1)
@@ -84,15 +86,15 @@ class SubmitOneVideoTests(ChannelCommandTestCase):
         self.add_audio(B)
         client = mock.Mock()
         client.recognize_file.return_value = {"status": "success", "result": []}
-        with mock.patch("audit.audd_client", return_value=client):
+        with mock.patch("music_audit.commands.scan.audd_client", return_value=client):
             self.run_command("submit", "--all-videos", "--video-id", B, "--delay", "0")
         self.assertEqual(client.recognize_file.call_count, 1)
-        self.assertEqual(list(audit.read_json(self.paths.submissions, {})), [url(B)])
+        self.assertEqual(list(workspace.read_json(self.paths.submissions, {})), [url(B)])
 
     def test_scanned_video_is_not_charged_again(self):
         self.mark_scanned(A)
         client = mock.Mock()
-        with mock.patch("audit.audd_client", return_value=client):
+        with mock.patch("music_audit.commands.scan.audd_client", return_value=client):
             self.run_command("submit", "--all-videos", "--video-id", A, "--delay", "0")
         client.recognize_file.assert_not_called()
         client.recognize_url.assert_not_called()
@@ -106,7 +108,7 @@ class ChannelReportCommandTests(ChannelCommandTestCase):
             "status": "success",
             "result": [{"offset": "00:12", "songs": [{"title": "Bài Thử", "artist": "Ca Sĩ", "label": "Hãng", "timecode": "00:30", "score": 100}]}],
         }
-        with mock.patch("audit.audd_client", return_value=client):
+        with mock.patch("music_audit.commands.scan.audd_client", return_value=client):
             self.run_command("submit", "--all-videos", "--video-id", A, "--delay", "0")
         report = json.loads(self.run_command("channel-report"))
         by_id = {line["videoId"]: line for line in report["videos"]}
@@ -124,11 +126,11 @@ class HistoryCommandTests(ChannelCommandTestCase):
 
     def setUp(self):
         super().setUp()
-        audit.write_json(self.paths.audd / f"{A}.json", self.RAW)
-        audit.write_json(self.paths.audd / f"file-{'0123456789abcdef' * 4}.json", self.RAW)
+        workspace.write_json(self.paths.audd / f"{A}.json", self.RAW)
+        workspace.write_json(self.paths.audd / f"file-{'0123456789abcdef' * 4}.json", self.RAW)
 
     def test_reads_saved_results_without_calling_audd(self):
-        with mock.patch("audit.audd_client") as client, mock.patch.dict(os.environ, {"YOUTUBE_API_KEY": ""}):
+        with mock.patch("music_audit.commands.identify.audd_client") as client, mock.patch.dict(os.environ, {"YOUTUBE_API_KEY": ""}):
             result = json.loads(self.run_command("history", A, "0123456789a", B))
         client.assert_not_called()
         self.assertEqual(set(result), {A, "0123456789a"})
@@ -145,7 +147,7 @@ class HistoryCommandTests(ChannelCommandTestCase):
     def test_titles_are_fetched_once_and_cached(self):
         client = mock.Mock()
         client.video_titles.return_value = {A: "Tên Video"}
-        with mock.patch.dict(os.environ, {"YOUTUBE_API_KEY": "k"}), mock.patch("audit.YoutubeClient", return_value=client):
+        with mock.patch.dict(os.environ, {"YOUTUBE_API_KEY": "k"}), mock.patch("music_audit.commands.identify.YoutubeClient", return_value=client):
             first = json.loads(self.run_command("history", A))
             second = json.loads(self.run_command("history", A))
         self.assertEqual((first[A]["title"], second[A]["title"]), ("Tên Video", "Tên Video"))
@@ -156,7 +158,7 @@ class ChannelStatusTests(ChannelCommandTestCase):
     def test_reports_each_video(self):
         self.add_audio(A)
         self.mark_scanned(B)
-        audit.write_json(self.paths.detections, {url(A): {"group": "co-nhac"}})
+        workspace.write_json(self.paths.detections, {url(A): {"group": "co-nhac"}})
         status = json.loads(self.run_command("channel-status"))
         self.assertEqual(status["channel"], "Kênh")
         self.assertEqual(status["maxSeconds"], 3600)

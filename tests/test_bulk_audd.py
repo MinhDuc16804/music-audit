@@ -20,6 +20,9 @@ from pathlib import Path
 from unittest import mock
 
 import audit
+from music_audit import workspace
+from music_audit.commands.report import parse_stored
+from music_audit.commands.scan import _recognize_clips, _shift_offset, full_requests
 from music_audit import detect
 from music_audit.audd import parse_saved
 from music_audit.evaluate import HOLD, identify_summary
@@ -301,7 +304,7 @@ class ClipFlowTests(ServerTestCase):
         parsed = audit.build_parser().parse_args(["--workdir", str(self.workdir), *args])
         with mock.patch.dict(os.environ, self.env()), mock.patch.object(detect, "cut_clip", fake_cut), \
                 contextlib.redirect_stdout(output):
-            parsed.handler(parsed, audit.Paths(parsed.workdir))
+            parsed.handler(parsed, workspace.Paths(parsed.workdir))
         return output.getvalue()
 
     def test_submit_with_clips_sends_grid_clips_outside_intro(self):
@@ -368,7 +371,7 @@ class HelperTests(unittest.TestCase):
 
     def test_no_match_is_unknown_not_clean(self):
         for result in ([], None):
-            scan = audit.parse_stored({"provider": "audd", "response": {"status": "success", "result": result}})
+            scan = parse_stored({"provider": "audd", "response": {"status": "success", "result": result}})
             self.assertEqual((scan.music, scan.state), ("unknown", 1))
 
     def test_music_service_choice(self):
@@ -379,51 +382,51 @@ class HelperTests(unittest.TestCase):
         ]
         for env, expected in cases:
             with mock.patch.dict(os.environ, env):
-                self.assertEqual(audit.music_service(), expected)
+                self.assertEqual(workspace.music_service(), expected)
         with mock.patch.dict(os.environ, {"MUSIC_SERVICE": "khac"}), self.assertRaises(SystemExit):
-            audit.music_service()
+            workspace.music_service()
 
     def test_shift_offset(self):
-        self.assertEqual(audit._shift_offset("00:12", 30.4), "00:42")
-        self.assertEqual(audit._shift_offset("khong-ro", 30), "khong-ro")
+        self.assertEqual(_shift_offset("00:12", 30.4), "00:42")
+        self.assertEqual(_shift_offset("khong-ro", 30), "khong-ro")
 
     def test_full_requests_rounds_up_and_respects_limit(self):
-        self.assertEqual(audit._full_requests("13", 300), 2)
-        self.assertEqual(audit._full_requests(3600, 25), 25)
-        self.assertEqual(audit._full_requests("", 300), 0)
+        self.assertEqual(full_requests("13", 300), 2)
+        self.assertEqual(full_requests(3600, 25), 25)
+        self.assertEqual(full_requests("", 300), 0)
 
     def test_clip_result_as_single_object_is_kept(self):
         """Phản hồi dạng một bài (result là object) không được làm mất bài đó."""
         with tempfile.TemporaryDirectory() as folder:
-            paths = audit.Paths(folder)
+            paths = workspace.Paths(folder)
             paths.audio.mkdir(parents=True)
             (paths.audio / "clipvid0000.m4a").write_bytes(b"x")
-            audit.write_json(paths.detect_cache / "clipvid0000.json", {"music": [0.9] * 100})
+            workspace.write_json(paths.detect_cache / "clipvid0000.json", {"music": [0.9] * 100})
             client = mock.Mock()
             client.recognize_file.return_value = {"status": "success", "result": {"title": "A", "artist": "B"}}
             with mock.patch.object(detect, "cut_clip", lambda _s, _a, target, **_k: target):
-                response, _ = audit._recognize_clips(client, paths, "https://youtu.be/clipvid0000", 1)
+                response, _ = _recognize_clips(client, paths, "https://youtu.be/clipvid0000", 1)
         self.assertEqual(response["result"][0]["songs"], [{"title": "A", "artist": "B"}])
 
     def test_labelled_row_wins_over_random_sample_but_real_duplicates_stay(self):
         with tempfile.TemporaryDirectory() as folder:
-            paths = audit.Paths(folder)
+            paths = workspace.Paths(folder)
             paths.data.mkdir()
             paths.testset.write_text("source,group,has_music\nA,commercial,yes\nB,commercial,no\nB,commercial,no", encoding="utf-8")
             paths.sample.write_text("source,group\nA,random\nC,random", encoding="utf-8")
-            rows = audit.load_testset(paths)
+            rows = workspace.load_testset(paths)
         self.assertEqual([row["source"] for row in rows], ["A", "B", "B", "C"])
         self.assertEqual(rows[0]["group"], "commercial")
 
     def test_local_audio_needs_real_id_and_non_empty_file(self):
         with tempfile.TemporaryDirectory() as folder:
-            paths = audit.Paths(folder)
+            paths = workspace.Paths(folder)
             paths.audio.mkdir(parents=True)
             (paths.audio / "emptyfile00.m4a").write_bytes(b"")
             (paths.audio / "goodfile000.mp3").write_bytes(b"x")
-            self.assertIsNone(audit.local_audio(paths, "https://youtu.be/emptyfile00"))
-            self.assertEqual(audit.local_audio(paths, "https://youtu.be/goodfile000").name, "goodfile000.mp3")
-            self.assertIsNone(audit.local_audio(paths, str(Path(folder) / "bai.mp3")))
+            self.assertIsNone(workspace.local_audio(paths, "https://youtu.be/emptyfile00"))
+            self.assertEqual(workspace.local_audio(paths, "https://youtu.be/goodfile000").name, "goodfile000.mp3")
+            self.assertIsNone(workspace.local_audio(paths, str(Path(folder) / "bai.mp3")))
 
     def test_ffmpeg_location_from_env_is_used(self):
         with mock.patch.dict(os.environ, {"FFMPEG_LOCATION": "ffmpeg-rieng.exe"}), \
