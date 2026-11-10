@@ -2,12 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { Download, Info, LoaderCircle, RefreshCw, Search } from 'lucide-react';
 import type { AudioLibraryIndex } from './audioLibrary';
 import { formatDuration } from './batchScan';
-import { ChannelResult } from './ChannelTab';
+import { ChannelResult } from './ChannelReport';
 import { Panel, TrackList } from './components';
 import { buildHistoryCsv, filterHistory, historyTitle, UNKNOWN_USER } from './history';
 import type { HistoryEntry, HistoryKind, HistoryResponse } from './history';
 import { RescanControl } from './RescanControl';
 import { requestIdentify } from './scanJob';
+import { downloadCsv, formatNumber as number, PILL, PILL_BRAND, PILL_GREY, SMALL_BUTTON, VERDICT_LOOKS } from './ui';
 import { getVideoVerdict } from './videoCheck';
 import type { VideoVerdict, VideoVerdictKind } from './videoCheck';
 import { parseYoutubeVideoId } from './youtubeLink';
@@ -15,18 +16,8 @@ import { parseYoutubeVideoId } from './youtubeLink';
 const API = '/api/history';
 const PAGE_SIZE = 10;
 const KIND_LABELS: Record<HistoryKind | 'all', string> = { all: 'Tất cả', link: 'Một video', file: 'File', batch: 'Hàng loạt', channel: 'Cả kênh' };
-const PILL = 'inline-flex w-fit shrink-0 items-center rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset';
-const SMALL_BUTTON = 'rounded-xl border border-brand-200 bg-white px-3 py-1.5 text-xs font-medium text-brand-800 hover:bg-brand-50 disabled:opacity-60';
-const VERDICT_STYLE: Record<VideoVerdictKind, { label: string; pill: string }> = {
-  allowed: { label: 'Được dùng', pill: 'bg-emerald-50 text-emerald-800 ring-emerald-200' },
-  review: { label: 'Cần người duyệt', pill: 'bg-amber-50 text-amber-800 ring-amber-200' },
-  blocked: { label: 'Không được dùng', pill: 'bg-rose-50 text-rose-800 ring-rose-200' },
-  error: { label: 'Chưa có kết luận', pill: 'bg-slate-100 text-slate-600 ring-slate-200' },
-};
-const GREY = 'bg-slate-100 text-slate-600 ring-slate-200';
 const TILE_KINDS: VideoVerdictKind[] = ['allowed', 'review', 'blocked'];
 
-const number = (value: number) => value.toLocaleString('vi-VN');
 
 function timeParts(value: string): { day: string; clock: string; full: string } {
   const date = new Date(value);
@@ -40,12 +31,12 @@ function timeParts(value: string): { day: string; clock: string; full: string } 
 
 function statusOf(entry: HistoryEntry, verdict: VideoVerdict | undefined): { label: string; pill: string } {
   if (entry.kind === 'channel') {
-    return { label: 'Quét kênh', pill: 'bg-brand-50 text-brand-800 ring-brand-200' };
+    return { label: 'Quét kênh', pill: PILL_BRAND };
   }
   if (verdict) {
-    return VERDICT_STYLE[verdict.kind];
+    return VERDICT_LOOKS[verdict.kind];
   }
-  return entry.outcome === 'error' ? { label: 'Quét lỗi', pill: GREY } : { label: 'Không còn kết quả', pill: GREY };
+  return entry.outcome === 'error' ? { label: 'Quét lỗi', pill: PILL_GREY } : { label: 'Không còn kết quả', pill: PILL_GREY };
 }
 
 function personLabel(user: string, me: string): string {
@@ -123,7 +114,7 @@ function HistoryRow({ entry, verdict, me, onRescanned }: { entry: HistoryEntry; 
   );
 }
 
-function downloadCsv(rows: { entry: HistoryEntry; verdict?: VideoVerdict }[], me: string) {
+function downloadHistoryCsv(rows: { entry: HistoryEntry; verdict?: VideoVerdict }[], me: string) {
   const csv = buildHistoryCsv(
     rows.map(({ entry, verdict }) => ({
       time: timeParts(entry.time).full,
@@ -135,13 +126,7 @@ function downloadCsv(rows: { entry: HistoryEntry; verdict?: VideoVerdict }[], me
       tracks: verdict?.tracks.map(({ track }) => `${track.title} - ${track.artists}`) ?? [],
     })),
   );
-  // BOM để Excel đọc đúng tiếng Việt.
-  const url = URL.createObjectURL(new Blob([`﻿${csv}`], { type: 'text/csv;charset=utf-8' }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `lich-su-quet-${new Date().toISOString().slice(0, 10)}.csv`;
-  link.click();
-  URL.revokeObjectURL(url);
+  downloadCsv(csv, `lich-su-quet-${new Date().toISOString().slice(0, 10)}.csv`);
 }
 
 export function HistoryTab({ libraryIndex, isActive }: { libraryIndex: AudioLibraryIndex; isActive: boolean }) {
@@ -218,7 +203,7 @@ export function HistoryTab({ libraryIndex, isActive }: { libraryIndex: AudioLibr
               className={`flex flex-col gap-0.5 rounded-xl border p-3 text-left ${verdictFilter === tile ? 'border-brand-700 bg-brand-50' : 'border-brand-100 bg-white hover:border-brand-300'}`}
             >
               <strong className="text-xl font-bold text-slate-900 tabular-nums">{number(filtered.filter(({ verdict }) => verdict?.kind === tile).length)}</strong>
-              <span className="text-xs font-medium text-slate-600">{VERDICT_STYLE[tile].label}</span>
+              <span className="text-xs font-medium text-slate-600">{VERDICT_LOOKS[tile].label}</span>
             </button>
           ))}
         </div>
@@ -298,7 +283,7 @@ export function HistoryTab({ libraryIndex, isActive }: { libraryIndex: AudioLibr
           <button type="button" disabled={shownPage >= pages - 1} onClick={() => setPage(shownPage + 1)} className={SMALL_BUTTON}>
             Sau
           </button>
-          <button type="button" disabled={shown.length === 0} onClick={() => downloadCsv(shown, me)} className={`${SMALL_BUTTON} inline-flex items-center gap-1`}>
+          <button type="button" disabled={shown.length === 0} onClick={() => downloadHistoryCsv(shown, me)} className={`${SMALL_BUTTON} inline-flex items-center gap-1`}>
             <Download className="h-3.5 w-3.5" />
             Tải CSV
           </button>

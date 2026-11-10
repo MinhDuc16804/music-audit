@@ -5,6 +5,7 @@
 
 import { csvCell } from './batchScan.ts';
 import type { IdentifyResult } from './videoCheck.ts';
+import { foldText } from './textNormalize.ts';
 import { parseYoutubeVideoId } from './youtubeLink.ts';
 
 export type HistoryKind = 'link' | 'file' | 'batch' | 'channel';
@@ -76,11 +77,6 @@ export function parseUsageLog(text: string): HistoryEntry[] {
     entries.push(entry);
   });
   return entries.reverse().slice(0, MAX_ENTRIES);
-}
-
-/** Bỏ dấu và viết thường để tìm tên tiếng Việt không cần gõ dấu. */
-function foldText(value: string): string {
-  return value.toLowerCase().replace(/đ/g, 'd').normalize('NFD').replace(/\p{M}/gu, '');
 }
 
 export function historyTitle(entry: HistoryEntry): string {

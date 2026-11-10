@@ -2,12 +2,12 @@ import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { LoaderCircle, RefreshCw, ShieldAlert } from 'lucide-react';
 import { Panel } from './components';
+import { formatNumber as number } from './ui';
 import { audioLeftText, daysLeft, formatQuotaDate, isQuotaLow, percentUsed } from './quota';
 import type { QuotaAccount, QuotaResponse, QuotaStatus } from './quota';
 
 const API = '/api/quota';
 const REFRESH_MS = 5 * 60_000;
-const number = (value: number) => value.toLocaleString('vi-VN');
 
 const PROBLEMS: Record<Exclude<QuotaStatus, 'ok'>, string> = {
   login: 'Máy chủ chưa đăng nhập tài khoản AudD nên chưa có số liệu. Người quản trị cần chạy audd login, xem README. Việc quét vẫn chạy bình thường.',

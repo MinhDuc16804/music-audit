@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { LoaderCircle, RefreshCw } from 'lucide-react';
 import { getRescanCost, savedResultNote } from './rescan';
+import { SMALL_BUTTON } from './ui';
 import type { IdentifyResult } from './videoCheck';
 
-const SMALL_BUTTON = 'inline-flex items-center gap-1.5 rounded-xl border border-brand-200 bg-white px-3 py-1.5 text-xs font-medium text-brand-800 hover:bg-brand-50 disabled:opacity-60';
+const BUTTON = `${SMALL_BUTTON} inline-flex items-center gap-1.5`;
 
 /**
  * Nút Quét lại cho một kết quả cũ. Quét lại gửi âm thanh cho AudD lần nữa và tốn yêu cầu,
@@ -53,7 +54,7 @@ export function RescanControl({
     <div className="grid gap-2 text-xs">
       <p className="flex flex-wrap items-center gap-2 text-slate-500">
         {savedResultNote(result.scanned_at)} Lấy lại không tốn yêu cầu AudD.
-        <button type="button" disabled={step !== 'idle'} onClick={() => setStep('confirming')} className={SMALL_BUTTON}>
+        <button type="button" disabled={step !== 'idle'} onClick={() => setStep('confirming')} className={BUTTON}>
           {step === 'running' ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
           {step === 'running' ? 'Đang quét lại...' : 'Quét lại'}
         </button>
@@ -68,7 +69,7 @@ export function RescanControl({
             <button type="button" onClick={() => void handleConfirm()} className="rounded-xl bg-brand-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-900">
               Quét lại, tốn {requestText}
             </button>
-            <button type="button" onClick={() => setStep('idle')} className={SMALL_BUTTON}>
+            <button type="button" onClick={() => setStep('idle')} className={BUTTON}>
               Giữ kết quả cũ
             </button>
           </div>

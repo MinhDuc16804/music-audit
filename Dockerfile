@@ -26,7 +26,8 @@ COPY music_audit ./music_audit
 COPY resources ./resources
 COPY web/package.json ./web/
 COPY web/server ./web/server
-COPY web/src/youtubeLink.ts web/src/uploadLimit.ts web/src/batchScan.ts web/src/channelScan.ts web/src/history.ts ./web/src/
+# Server nạp thẳng một số file trong src, chép cả thư mục để không sót file khi các file đó import thêm file khác.
+COPY web/src ./web/src
 COPY --from=build /app/web/dist ./web/dist
 RUN mkdir /data && chown node:node /data
 

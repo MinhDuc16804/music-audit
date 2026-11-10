@@ -14,3 +14,8 @@ export function normalizeText(value: string): string {
 export function normalizeTitle(value: string): string {
   return normalizeText(value.replace(/\(.*?\)|\[.*?\]/g, ' '));
 }
+
+/** Bỏ dấu và viết thường để tìm tên tiếng Việt không cần gõ dấu. */
+export function foldText(value: string): string {
+  return value.toLowerCase().replace(/đ/g, 'd').normalize('NFD').replace(/\p{M}/gu, '');
+}

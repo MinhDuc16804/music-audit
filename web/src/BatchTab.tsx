@@ -7,41 +7,18 @@ import type { Batch, BatchCurrentResponse, BatchEstimateResponse, BatchItem } fr
 import { IconBadge, Panel, SoundBars, TrackList } from './components';
 import { NotifySwitch, useScanNotice } from './NotifySwitch';
 import { describeBatchChange } from './scanNotice';
+import { downloadCsv, PILL, PILL_BRAND, PILL_GREY, postJson, readJsonResponse, SMALL_BUTTON, VERDICT_LOOKS } from './ui';
 import { getVideoVerdict } from './videoCheck';
 import type { VideoVerdict, VideoVerdictKind } from './videoCheck';
 
 const BATCH_API = '/api/batches';
 const POLL_INTERVAL_MS = 3000;
 const ESTIMATE_DELAY_MS = 500;
-const SMALL_BUTTON = 'rounded-xl border border-brand-200 bg-white px-3 py-1.5 text-xs font-medium text-brand-800 hover:bg-brand-50';
-const PILL = 'inline-flex w-fit shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset';
-const PILL_SLATE = 'bg-slate-100 text-slate-600 ring-slate-200';
-
 const VERDICT_DISPLAY: Record<VideoVerdictKind, { label: string; pill: string; icon: ReactNode; tileIcon: ReactNode }> = {
-  allowed: {
-    label: 'Được dùng',
-    pill: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
-    icon: <ShieldCheck className="h-4 w-4" />,
-    tileIcon: <ShieldCheck className="h-3.5 w-3.5 text-emerald-700" />,
-  },
-  review: {
-    label: 'Cần người duyệt',
-    pill: 'bg-amber-50 text-amber-800 ring-amber-200',
-    icon: <ShieldQuestion className="h-4 w-4" />,
-    tileIcon: <ShieldQuestion className="h-3.5 w-3.5 text-amber-700" />,
-  },
-  blocked: {
-    label: 'Không được dùng',
-    pill: 'bg-rose-50 text-rose-800 ring-rose-200',
-    icon: <ShieldX className="h-4 w-4" />,
-    tileIcon: <ShieldX className="h-3.5 w-3.5 text-rose-700" />,
-  },
-  error: {
-    label: 'Chưa có kết luận',
-    pill: PILL_SLATE,
-    icon: <ShieldAlert className="h-4 w-4" />,
-    tileIcon: <ShieldAlert className="h-3.5 w-3.5 text-slate-500" />,
-  },
+  allowed: { ...VERDICT_LOOKS.allowed, icon: <ShieldCheck className="h-4 w-4" />, tileIcon: <ShieldCheck className="h-3.5 w-3.5 text-emerald-700" /> },
+  review: { ...VERDICT_LOOKS.review, icon: <ShieldQuestion className="h-4 w-4" />, tileIcon: <ShieldQuestion className="h-3.5 w-3.5 text-amber-700" /> },
+  blocked: { ...VERDICT_LOOKS.blocked, icon: <ShieldX className="h-4 w-4" />, tileIcon: <ShieldX className="h-3.5 w-3.5 text-rose-700" /> },
+  error: { ...VERDICT_LOOKS.error, icon: <ShieldAlert className="h-4 w-4" />, tileIcon: <ShieldAlert className="h-3.5 w-3.5 text-slate-500" /> },
 };
 const VERDICT_KINDS = Object.keys(VERDICT_DISPLAY) as VideoVerdictKind[];
 
@@ -51,21 +28,7 @@ const BATCH_TITLES: Record<Batch['status'], string> = {
   done: 'Đã quét xong lô',
 };
 
-async function readBatchResponse<T>(response: Response): Promise<T> {
-  const payload: unknown = await response.json().catch(() => null);
-  if (!response.ok || payload === null) {
-    throw new Error((payload as { error?: string } | null)?.error ?? 'Không gọi được máy chủ.');
-  }
-  return payload as T;
-}
-
-function postBatch<T>(path: string, body: unknown = {}): Promise<T> {
-  return fetch(`${BATCH_API}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  }).then((response) => readBatchResponse<T>(response));
-}
+const postBatch = <T,>(path: string, body: unknown = {}) => postJson<T>(`${BATCH_API}${path}`, body);
 
 function getItemKind(item: BatchItem, verdict: VideoVerdict | undefined): VideoVerdictKind | null {
   if (item.status === 'error') {
@@ -97,14 +60,14 @@ function StatusPill({ item, kind }: { item: BatchItem; kind: VideoVerdictKind | 
   }
   if (item.status === 'running') {
     return (
-      <span className={`${PILL} bg-brand-50 text-brand-800 ring-brand-200`}>
+      <span className={`${PILL} ${PILL_BRAND}`}>
         <LoaderCircle className="h-4 w-4 animate-spin" />
         Đang quét
       </span>
     );
   }
   return (
-    <span className={`${PILL} ${PILL_SLATE}`}>
+    <span className={`${PILL} ${PILL_GREY}`}>
       {item.status === 'cancelled' ? <Ban className="h-4 w-4" /> : <Clock className="h-4 w-4" />}
       {item.status === 'cancelled' ? 'Đã hủy' : 'Đang chờ'}
     </span>
@@ -159,7 +122,7 @@ function BatchRow({ item, verdict, onRetry }: { item: BatchItem; verdict?: Video
   );
 }
 
-function downloadCsv(batch: Batch, verdicts: Map<string, VideoVerdict>) {
+function downloadBatchCsv(batch: Batch, verdicts: Map<string, VideoVerdict>) {
   const rows = batch.items
     .filter(({ status }) => status === 'done' || status === 'error')
     .map((item) => {
@@ -172,13 +135,7 @@ function downloadCsv(batch: Batch, verdicts: Map<string, VideoVerdict>) {
         tracks: verdict?.tracks.map(({ track }) => `${track.title} - ${track.artists}`) ?? [],
       };
     });
-  // BOM để Excel đọc đúng tiếng Việt.
-  const url = URL.createObjectURL(new Blob([`﻿${buildBatchCsv(rows)}`], { type: 'text/csv;charset=utf-8' }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `quet-hang-loat-${batch.createdAt.slice(0, 10)}.csv`;
-  link.click();
-  URL.revokeObjectURL(url);
+  downloadCsv(buildBatchCsv(rows), `quet-hang-loat-${batch.createdAt.slice(0, 10)}.csv`);
 }
 
 function BatchResult({
@@ -230,7 +187,7 @@ function BatchResult({
             <button
               type="button"
               disabled={finished.length === 0}
-              onClick={() => downloadCsv(batch, verdicts)}
+              onClick={() => downloadBatchCsv(batch, verdicts)}
               className={`${SMALL_BUTTON} inline-flex items-center gap-1 disabled:opacity-60`}
             >
               <Download className="h-3.5 w-3.5" />
@@ -320,7 +277,7 @@ export function BatchTab({ libraryIndex, isLibraryReady }: { libraryIndex: Audio
     let isCancelled = false;
     const refresh = () =>
       fetch(`${BATCH_API}/current`)
-        .then((response) => readBatchResponse<BatchCurrentResponse>(response))
+        .then((response) => readJsonResponse<BatchCurrentResponse>(response))
         .then((next) => {
           if (!isCancelled) {
             setState(next);

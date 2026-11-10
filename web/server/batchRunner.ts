@@ -4,13 +4,11 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
 import { isValidVideoId, MAX_BATCH_VIDEOS } from '../src/batchScan.ts';
 import type { Batch, BatchItem } from '../src/batchScan.ts';
 import type { IdentifyResult } from '../src/videoCheck.ts';
 import { getVideoUrl } from '../src/youtubeLink.ts';
+import { createStateFile } from './stateFile.ts';
 
 export const BATCH_ROUTE = '/api/batches';
 /** Nghỉ giữa hai video phải tải về, để YouTube đỡ chặn địa chỉ máy chủ. */
@@ -98,35 +96,16 @@ export function createBatchRunner(deps: BatchRunnerDeps) {
   const delayMs = deps.delayMs ?? DEFAULT_DELAY_MS;
   let batches: Batch[] = [];
   let loading: Promise<void> | null = null;
-  let writes: Promise<unknown> = Promise.resolve();
   let isPumping = false;
-
-  const persist = () => {
-    const snapshot = JSON.stringify(batches);
-    writes = writes
-      .then(async () => {
-        const path = deps.getFilePath();
-        await mkdir(dirname(path), { recursive: true });
-        await writeFile(`${path}.tmp`, snapshot, 'utf8');
-        await rename(`${path}.tmp`, path);
-      })
-      .catch((error: unknown) => {
-        console.error(`Không lưu được hàng đợi quét: ${error instanceof Error ? error.message : String(error)}`);
-      });
-    return writes;
-  };
+  const stateFile = createStateFile<Batch[]>(deps.getFilePath, 'hàng đợi quét');
+  const persist = () => stateFile.write(batches);
 
   const load = async () => {
-    const path = deps.getFilePath();
-    if (!existsSync(path)) {
+    const saved = await stateFile.read();
+    if (!saved) {
       return;
     }
-    try {
-      batches = JSON.parse(await readFile(path, 'utf8')) as Batch[];
-    } catch (error) {
-      console.error(`Không đọc được hàng đợi quét: ${error instanceof Error ? error.message : String(error)}`);
-      return;
-    }
+    batches = saved;
     // App dừng giữa chừng thì video đang quét chưa có kết quả, xếp lại để quét tiếp.
     for (const item of batches.flatMap((batch) => batch.items)) {
       if (item.status === 'running') {

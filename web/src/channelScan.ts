@@ -4,6 +4,7 @@
  */
 
 import { csvCell, formatDuration } from './batchScan.ts';
+import { foldText } from './textNormalize.ts';
 
 const CLIP_EVERY_SECONDS = 45;
 export const MIN_CLIPS = 2;
@@ -229,11 +230,6 @@ export function worstCaseRequests(videos: ChannelVideo[], options: ChannelOption
       const scanned = Math.min(video.seconds, maxSeconds);
       return sum + (options.clips > 0 ? Math.min(options.clips, Math.ceil(scanned / CLIP_EVERY_SECONDS)) : video.requests);
     }, 0);
-}
-
-/** Bỏ dấu và viết thường để tìm tên tiếng Việt không cần gõ dấu. */
-function foldText(value: string): string {
-  return value.toLowerCase().replace(/đ/g, 'd').normalize('NFD').replace(/\p{M}/gu, '');
 }
 
 export function searchChannelVideos(videos: ChannelVideo[], query: string): ChannelVideo[] {

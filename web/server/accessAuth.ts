@@ -63,7 +63,7 @@ export async function verifyAccessToken(
   if (!jwk) {
     throw new AccessError('Không tìm thấy khóa đã ký token.');
   }
-  const isSigned = verify('RSA-SHA256', Buffer.from(`${headerPart}.${payloadPart}`), createPublicKey({ key: jwk as Parameters<typeof createPublicKey>[0] extends { key: infer Key } ? Extract<Key, object> : never, format: 'jwk' }), Buffer.from(signaturePart, 'base64url'));
+  const isSigned = verify('RSA-SHA256', Buffer.from(`${headerPart}.${payloadPart}`), createPublicKey({ key: jwk, format: 'jwk' } as Parameters<typeof createPublicKey>[0]), Buffer.from(signaturePart, 'base64url'));
   if (!isSigned) {
     throw new AccessError('Chữ ký token không đúng.');
   }

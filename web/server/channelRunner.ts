@@ -6,9 +6,6 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
 import { buildChannelGate, parseProgress, pickToSend, unsentRequests } from '../src/channelScan.ts';
 import type {
   ChannelCurrentResponse,
@@ -20,6 +17,7 @@ import type {
   ChannelStatus,
   ChannelVideo,
 } from '../src/channelScan.ts';
+import { createStateFile } from './stateFile.ts';
 
 export const CHANNEL_ROUTE = '/api/channel-scans';
 const DEFAULT_MAX_REQUESTS = 5000;
@@ -117,37 +115,19 @@ function toView({ videos, pendingIds: _pendingIds, ...scan }: ChannelScan): Chan
 export function createChannelRunner(deps: ChannelRunnerDeps) {
   let scans: ChannelScan[] = [];
   let loading: Promise<void> | null = null;
-  let writes: Promise<unknown> = Promise.resolve();
+  const stateFile = createStateFile<ChannelScan[]>(deps.getFilePath, 'trạng thái quét kênh');
   let stopStep: (() => void) | null = null;
   let isListing = false;
 
-  const persist = () => {
-    const snapshot = JSON.stringify(scans);
-    writes = writes
-      .then(async () => {
-        const path = deps.getFilePath();
-        await mkdir(dirname(path), { recursive: true });
-        await writeFile(`${path}.tmp`, snapshot, 'utf8');
-        await rename(`${path}.tmp`, path);
-      })
-      .catch((error: unknown) => {
-        console.error(`Không lưu được trạng thái quét kênh: ${errorText(error)}`);
-      });
-    return writes;
-  };
+  const persist = () => stateFile.write(scans);
 
   /** Không tự chạy tiếp sau khi khởi động lại, vì việc gửi AudD tính phí nên phải có người bấm. */
   const load = async () => {
-    const path = deps.getFilePath();
-    if (!existsSync(path)) {
+    const saved = await stateFile.read();
+    if (!saved) {
       return;
     }
-    try {
-      scans = JSON.parse(await readFile(path, 'utf8')) as ChannelScan[];
-    } catch (error) {
-      console.error(`Không đọc được trạng thái quét kênh: ${errorText(error)}`);
-      return;
-    }
+    scans = saved;
     for (const scan of scans.filter(({ status }) => RUNNING_STATUSES.has(status))) {
       scan.pausedFrom = scan.status;
       scan.status = 'paused';

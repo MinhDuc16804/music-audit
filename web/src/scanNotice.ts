@@ -5,6 +5,7 @@
 
 import type { Batch } from './batchScan.ts';
 import type { ChannelScanView, ChannelStatus } from './channelScan.ts';
+import { formatNumber as number } from './ui.ts';
 
 export interface ScanNotice {
   title: string;
@@ -19,7 +20,6 @@ export interface SeenStatus<Status> {
   status: Status;
 }
 
-const number = (value: number) => value.toLocaleString('vi-VN');
 const RUNNING_CHANNEL: ChannelStatus[] = ['downloading', 'filtering', 'identifying'];
 
 export function describeBatchChange(previous: SeenStatus<Batch['status']> | null, batch: Batch | null): ScanNotice | null {
