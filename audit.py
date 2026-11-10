@@ -8,6 +8,7 @@ import json
 import math
 import os
 import random
+import re
 import subprocess
 import sys
 import tempfile
@@ -711,9 +712,9 @@ def youtube_duration(video_id):
         return 0
 
 
-def _print_audd_result(source, source_id, raw, limit, duration=0):
+def _audd_output(source, source_id, raw, limit, duration=0):
     minutes = limit * CHUNK_SECONDS // 60
-    output = {
+    return {
         "url": source,
         "video_id": source_id,
         "status": "done",
@@ -723,7 +724,47 @@ def _print_audd_result(source, source_id, raw, limit, duration=0):
         "duration_seconds": duration,
         "max_seconds": limit * CHUNK_SECONDS,
     }
-    print(json.dumps(output, ensure_ascii=False, indent=2))
+
+
+def _print_audd_result(source, source_id, raw, limit, duration=0):
+    print(json.dumps(_audd_output(source, source_id, raw, limit, duration), ensure_ascii=False, indent=2))
+
+
+HISTORY_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
+
+
+def _history_cache(paths, key):
+    """File kết quả AudD đã lưu: theo mã video, hoặc theo 11 ký tự đầu mã băm của file tải lên."""
+    video_cache = paths.audd / f"{key}.json"
+    if video_cache.is_file():
+        return video_cache, True
+    files = sorted(paths.audd.glob(f"file-{key}*.json")) if re.fullmatch(r"[0-9a-f]{11}", key) else []
+    return (files[0], False) if files else (None, False)
+
+
+def cmd_history(args, paths):
+    """In kết quả đã lưu của các lần quét cũ dạng JSON. Chỉ đọc file đã lưu, không gửi gì cho AudD."""
+    limit = audd_max_chunks()
+    keys = [key for key in dict.fromkeys(args.ids) if HISTORY_ID.match(key)]
+    found = {key: _history_cache(paths, key) for key in keys}
+    titles_path = paths.out / "video_titles.json"
+    titles = read_json(titles_path, {})
+    missing = [key for key, (cache, is_video) in found.items() if cache and is_video and key not in titles]
+    api_key = os.environ.get("YOUTUBE_API_KEY", "")
+    if missing and api_key:
+        try:
+            titles.update(YoutubeClient(api_key).video_titles(missing))
+            write_json(titles_path, titles)
+        except YoutubeError:
+            pass  # thiếu tên thì tab vẫn hiện link, không được làm hỏng lịch sử
+    results = {}
+    for key, (cache, is_video) in found.items():
+        raw = read_json(cache, None) if cache else None
+        if raw is None:
+            continue
+        source = video_url(key) if is_video else ""
+        results[key] = {**_audd_output(source, key, raw, limit, raw.get("duration_seconds") or 0), "title": titles.get(key, "")}
+    print(json.dumps(results, ensure_ascii=False))
 
 
 def _identify_with_audd(args, paths, video_id, url):
@@ -956,6 +997,10 @@ def build_parser():
 
     command = commands.add_parser("channel-report", help="In báo cáo cả kênh dạng JSON")
     command.set_defaults(handler=cmd_channel_report)
+
+    command = commands.add_parser("history", help="In kết quả đã lưu của các lần quét cũ dạng JSON, không tốn lượt AudD")
+    command.add_argument("ids", nargs="*", help="Mã video, hoặc 11 ký tự đầu mã băm của file tải lên")
+    command.set_defaults(handler=cmd_history)
 
     command = commands.add_parser("detect-music", help="Lọc trước có nhạc hay không trên file đã tải (không tốn lượt AudD)")
     command.add_argument("--all-videos", action="store_true", help=all_videos_help)

@@ -6,6 +6,7 @@ import {
   CloudUpload,
   ExternalLink,
   Gauge,
+  History,
   Info,
   Library,
   Link2,
@@ -29,13 +30,14 @@ import { RESOURCE_GROUPS } from './catalog';
 import type { MusicResource } from './catalog';
 import { Panel, SectionTitle, SoundBars, TrackList } from './components';
 import { readMediaDuration } from './mediaDuration';
+import { HistoryTab } from './HistoryTab';
 import { QuotaTab } from './QuotaTab';
 import { MAX_UPLOAD_BYTES, MAX_UPLOAD_MB, UPLOAD_TOO_LARGE_MESSAGE } from './uploadLimit';
 import { getVideoVerdict } from './videoCheck';
 import type { IdentifyResult, VideoVerdictKind } from './videoCheck';
 import { parseYoutubeVideoId } from './youtubeLink';
 
-type TabId = 'video' | 'batch' | 'channel' | 'quota' | 'library';
+type TabId = 'video' | 'batch' | 'channel' | 'history' | 'quota' | 'library';
 
 interface AudioLibraryState {
   status: 'loading' | 'ready' | 'failed';
@@ -61,6 +63,12 @@ const TABS: { id: TabId; label: string; description: string; icon: ReactNode }[]
     label: 'Quét cả kênh',
     description: 'Lấy toàn bộ video của một kênh, lọc video có nhạc ngay trên máy chủ rồi nhận diện bài. Kết quả gồm báo cáo theo video và danh sách bài.',
     icon: <Tv className="h-4 w-4" />,
+  },
+  {
+    id: 'history',
+    label: 'Lịch sử quét',
+    description: 'Xem lại các video, file và kênh đã quét, ai quét, lúc nào và kết luận ra sao. Mở lại kết quả cũ không tốn thêm lượt.',
+    icon: <History className="h-4 w-4" />,
   },
   {
     id: 'quota',
@@ -528,6 +536,9 @@ export default function App() {
           </div>
           <div hidden={activeTab !== 'channel'}>
             <ChannelTab />
+          </div>
+          <div hidden={activeTab !== 'history'}>
+            <HistoryTab libraryIndex={library.index} isActive={activeTab === 'history'} />
           </div>
           <div hidden={activeTab !== 'quota'}>
             <QuotaTab />

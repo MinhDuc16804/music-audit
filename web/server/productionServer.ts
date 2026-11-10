@@ -13,6 +13,7 @@ import { join, resolve } from 'node:path';
 import { BATCH_ROUTE } from './batchRunner.ts';
 import { CHANNEL_ROUTE } from './channelRunner.ts';
 import { createHandlers, FILE_ROUTE, ROUTE } from './identifyPlugin.ts';
+import { HISTORY_ROUTE } from './history.ts';
 import { QUOTA_ROUTE } from './quota.ts';
 import { getContentType, resolveStaticPath } from './staticFiles.ts';
 
@@ -25,7 +26,7 @@ const HEALTH_ROUTE = '/api/health';
 // Tải lên file lớn qua mạng chậm có thể mất nhiều phút.
 const UPLOAD_TIMEOUT_MS = 15 * 60_000;
 
-const { handleLink, handleFile, handleBatch, handleChannel, handleQuota, startBatches } = createHandlers(() => AUDIT_ROOT);
+const { handleLink, handleFile, handleBatch, handleChannel, handleQuota, handleHistory, startBatches } = createHandlers(() => AUDIT_ROOT);
 
 async function sendStaticFile(request: IncomingMessage, response: ServerResponse, pathname: string) {
   if (request.method !== 'GET' && request.method !== 'HEAD') {
@@ -65,6 +66,8 @@ const server = createServer((request, response) => {
     void handleChannel(request, response);
   } else if (pathname === QUOTA_ROUTE) {
     void handleQuota(request, response);
+  } else if (pathname === HISTORY_ROUTE) {
+    void handleHistory(request, response);
   } else {
     void sendStaticFile(request, response, pathname);
   }

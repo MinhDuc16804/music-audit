@@ -100,6 +100,15 @@ class YoutubeClient:
                 durations[item["id"]] = parse_duration(item["contentDetails"].get("duration"))
         return durations
 
+    def video_titles(self, video_ids):
+        """Trả về tên của nhiều video, video không tìm thấy thì không có trong kết quả."""
+        titles = {}
+        for start in range(0, len(video_ids), 50):
+            batch = ",".join(video_ids[start : start + 50])
+            for item in self._get("videos", {"part": "snippet", "id": batch}).get("items") or []:
+                titles[item["id"]] = item["snippet"]["title"]
+        return titles
+
     def _playlist_video_ids(self, playlist_id):
         video_ids = []
         token = None

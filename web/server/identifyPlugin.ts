@@ -8,7 +8,7 @@
 
 import { spawn } from 'node:child_process';
 import { createWriteStream, existsSync } from 'node:fs';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
 import { basename, extname, join, resolve } from 'node:path';
@@ -16,12 +16,14 @@ import type { Plugin } from 'vite';
 import { MAX_UPLOAD_BYTES, UPLOAD_TOO_LARGE_MESSAGE } from '../src/uploadLimit.ts';
 import { DEFAULT_MAX_SCAN_SECONDS } from '../src/batchScan.ts';
 import type { BatchCurrentResponse, BatchEstimateResponse } from '../src/batchScan.ts';
+import type { HistoryResponse, HistoryResult } from '../src/history.ts';
 import type { QuotaResponse } from '../src/quota.ts';
 import type { IdentifyResult } from '../src/videoCheck.ts';
 import { getVideoUrl, parseYoutubeVideoId } from '../src/youtubeLink.ts';
 import { parseChannelInput, parseChannelOptions } from '../src/channelScan.ts';
 import { BATCH_ROUTE, BatchError, createBatchRunner, matchBatchRoute, parseBatchVideoIds } from './batchRunner.ts';
 import { CHANNEL_ROUTE, ChannelError, createChannelRunner, matchChannelRoute, parseMaxRequests } from './channelRunner.ts';
+import { HISTORY_ROUTE, readHistory } from './history.ts';
 import { AuddCommandError, createQuotaReader, QUOTA_ROUTE } from './quota.ts';
 import { appendUsage, createDailyLimiter, getUserEmail, parseDailyLimit } from './usageLimit.ts';
 import type { UsageEntry } from './usageLimit.ts';
@@ -220,8 +222,20 @@ export function createHandlers(getAuditRoot: () => string) {
   const allowScan = createDailyLimiter(parseDailyLimit(process.env.MAX_SCANS_PER_USER_PER_DAY));
   const getOutFolder = () => join(process.env.MUSIC_AUDIT_WORKDIR ?? getAuditRoot(), 'out');
 
-  const logUsage = (user: string, kind: UsageEntry['kind'], target: string, outcome: UsageEntry['outcome']) =>
-    appendUsage(join(getOutFolder(), 'usage.jsonl'), { time: new Date().toISOString(), user, kind, target, outcome });
+  const logUsage = (user: string, kind: UsageEntry['kind'], target: string, outcome: UsageEntry['outcome'], resultId?: string) =>
+    appendUsage(join(getOutFolder(), 'usage.jsonl'), { time: new Date().toISOString(), user, kind, target, outcome, ...(resultId ? { resultId } : {}) });
+
+  const handleHistory = async (request: IncomingMessage, response: ServerResponse) => {
+    if (request.method !== 'GET') {
+      sendJson(response, 405, { error: 'Chỉ nhận GET' });
+      return;
+    }
+    const entries = await readHistory({
+      readLog: () => readFile(join(getOutFolder(), 'usage.jsonl'), 'utf8').catch(() => ''),
+      readResults: async (keys) => (await runAudit(getAuditRoot(), ['history', ...keys])) as Record<string, HistoryResult>,
+    });
+    sendJson(response, 200, { entries, user: getUserEmail(request.headers) } satisfies HistoryResponse);
+  };
 
   // audit.py lưu kết quả AudD theo mã video, nên có file này nghĩa là quét lại không tốn thêm.
   const isCached = (videoId: string) => existsSync(join(getOutFolder(), 'audd', `${videoId}.json`));
@@ -459,7 +473,7 @@ export function createHandlers(getAuditRoot: () => string) {
       const uploadPath = join(folder, `upload${extname(fileName).toLowerCase()}`);
       await saveUpload(request, uploadPath);
       const result = await enqueue(['identify-file', uploadPath, `--name=${fileName}`]);
-      await logUsage(user, 'file', fileName, 'done');
+      await logUsage(user, 'file', fileName, 'done', (result as IdentifyResult).video_id);
       sendJson(response, 200, result);
     } catch (error) {
       await logUsage(user, 'file', fileName, 'error');
@@ -469,12 +483,12 @@ export function createHandlers(getAuditRoot: () => string) {
     }
   };
 
-  return { handleLink, handleFile, handleBatch, handleChannel, handleQuota, startBatches: batchRunner.start };
+  return { handleLink, handleFile, handleBatch, handleChannel, handleQuota, handleHistory, startBatches: batchRunner.start };
 }
 
 export function identifyPlugin(): Plugin {
   let auditRoot = '';
-  const { handleLink, handleFile, handleBatch, handleChannel, handleQuota, startBatches } = createHandlers(() => auditRoot);
+  const { handleLink, handleFile, handleBatch, handleChannel, handleQuota, handleHistory, startBatches } = createHandlers(() => auditRoot);
 
   return {
     name: 'music-audit-identify',
@@ -487,6 +501,7 @@ export function identifyPlugin(): Plugin {
       server.middlewares.use(BATCH_ROUTE, handleBatch);
       server.middlewares.use(CHANNEL_ROUTE, handleChannel);
       server.middlewares.use(QUOTA_ROUTE, handleQuota);
+      server.middlewares.use(HISTORY_ROUTE, handleHistory);
       void startBatches();
     },
     configurePreviewServer(server) {
@@ -495,6 +510,7 @@ export function identifyPlugin(): Plugin {
       server.middlewares.use(BATCH_ROUTE, handleBatch);
       server.middlewares.use(CHANNEL_ROUTE, handleChannel);
       server.middlewares.use(QUOTA_ROUTE, handleQuota);
+      server.middlewares.use(HISTORY_ROUTE, handleHistory);
       void startBatches();
     },
   };
