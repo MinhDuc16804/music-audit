@@ -496,14 +496,15 @@ export default function App() {
           </div>
         </div>
 
-        <nav className="flex gap-1 overflow-x-auto px-3 pb-3 lg:flex-1 lg:flex-col lg:overflow-visible lg:pb-0">
+        {/* Điện thoại: lưới 3 cột để thấy đủ 6 tab, không phải cuộn ngang. Máy tính: cột dọc bên trái. */}
+        <nav className="grid grid-cols-3 gap-1 px-3 pb-3 sm:grid-cols-6 lg:flex lg:flex-1 lg:flex-col lg:pb-0">
           {TABS.map((tab) => (
             <button
               key={tab.id}
               type="button"
               aria-current={activeTab === tab.id ? 'page' : undefined}
               onClick={() => setActiveTab(tab.id)}
-              className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-3 py-2.5 text-sm transition-colors ${
+              className={`flex min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-2 py-2 text-center text-xs leading-tight transition-colors lg:flex-row lg:justify-start lg:gap-2 lg:px-3 lg:py-2.5 lg:text-left lg:text-sm ${
                 activeTab === tab.id
                   ? 'bg-white font-semibold text-brand-800'
                   : 'text-brand-100 hover:bg-white/10 hover:text-white'

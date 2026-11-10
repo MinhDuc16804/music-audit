@@ -22,6 +22,19 @@
   color-scheme: light;
 }
 
+/* Viền khi dùng bàn phím cho nút, link và ô chọn. Ô nhập chữ đã có viền riêng khi focus. Đặt trong layer base để class của Tailwind đè được. */
+@layer base {
+  :where(button, a, summary, select, [tabindex], input[type='checkbox'], input[type='radio']):focus-visible {
+    outline: 2px solid var(--color-brand-600);
+    outline-offset: 2px;
+  }
+
+  /* Thanh bên nền xanh đậm: viền trắng mới thấy rõ. */
+  aside :focus-visible {
+    outline-color: #ffffff;
+  }
+}
+
 body {
   background-color: #f1f7ff;
   background-image:
