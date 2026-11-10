@@ -30,6 +30,13 @@ describe('createStateFile', () => {
     expect(JSON.parse(await readFile(path, 'utf8'))).toEqual([1, 2]);
   });
 
+  it('readSync đọc ngay giá trị đã ghi, chưa có file thì ra null', async () => {
+    const state = createStateFile<number[]>(() => join(folder, 'dong-bo.json'), 'thử');
+    expect(state.readSync()).toBeNull();
+    await state.write([4, 5]);
+    expect(state.readSync()).toEqual([4, 5]);
+  });
+
   it('các lần ghi đi lần lượt, lần sau cùng thắng', async () => {
     const state = createStateFile<string>(() => join(folder, 'state.json'), 'thử');
     void state.write('a');

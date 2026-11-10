@@ -70,7 +70,7 @@ nên app giới hạn file tải lên ở 95 MB. File lớn hơn thì xuất ri�
 
 Trên VPS, dữ liệu quét trong `out/` nằm ở nhà cung cấp ngoài công ty, và YouTube dễ chặn IP máy chủ hơn, nên quét bằng link có thể không chạy.
 
-Mỗi người có `MAX_SCANS_PER_USER_PER_DAY` lượt quét mỗi ngày, mặc định 30. Màn hình quét một video tính cả lượt lấy lại kết quả cũ, còn quét hàng loạt thì không. Quét lỗi thì được hoàn lượt. Bộ đếm về 0 lúc nửa đêm giờ Việt Nam và khi khởi động lại app.
+Mỗi người có `MAX_SCANS_PER_USER_PER_DAY` lượt quét mỗi ngày, mặc định 30. Màn hình quét một video tính cả lượt lấy lại kết quả cũ, còn quét hàng loạt thì không. Quét lỗi thì được hoàn lượt. Bộ đếm về 0 lúc nửa đêm giờ Việt Nam và được lưu trong `out/limits/`, nên khởi động lại app không xóa số đã dùng.
 Màn hình quét một video chạy nền trên server rồi trình duyệt hỏi lại kết quả mỗi 3 giây, nên không bị Cloudflare cắt khi quét lâu. Bấm Dừng chờ thì server vẫn quét nốt, kết quả xem ở tab Lịch sử quét.
 
 Khi kết quả là kết quả cũ, màn hình Kiểm tra nhạc và tab Lịch sử quét ghi ngày quét và có nút **Quét lại**. Nút này luôn hỏi lại kèm số yêu cầu AudD sẽ tốn, tính 1 lượt quét và được ghi `"rescan": true` trong `out/usage.jsonl`. File tải lên chỉ quét lại được ở màn hình Kiểm tra nhạc, vì server không giữ file.
@@ -108,7 +108,7 @@ Mục Quét cả kênh nhận link kênh có @handle hoặc mã UC…, cần `YO
 
 - App luôn dừng hỏi trước khi gửi AudD, kèm số video và số yêu cầu chính xác. Tải âm thanh và lọc nhạc không tốn lượt.
 - Mỗi lần quét không dùng `MAX_SCANS_PER_USER_PER_DAY` mà dùng trần `MAX_CHANNEL_SCAN_REQUESTS`, mặc định 5000 yêu cầu. Vượt trần thì không gửi được. Người bấm xác nhận và số yêu cầu được ghi vào `out/usage.jsonl`.
-- Mỗi người còn có hạn mức `MAX_CHANNEL_REQUESTS_PER_USER_PER_DAY` yêu cầu AudD cho quét kênh mỗi ngày, mặc định 5000. Số yêu cầu được giữ khi bấm Gửi nhận diện, dừng giữa chừng thì hoàn lại phần chưa gửi. Bộ đếm về 0 lúc nửa đêm và khi khởi động lại app.
+- Mỗi người còn có hạn mức `MAX_CHANNEL_REQUESTS_PER_USER_PER_DAY` yêu cầu AudD cho quét kênh mỗi ngày, mặc định 5000. Số yêu cầu được giữ khi bấm Gửi nhận diện, dừng giữa chừng thì hoàn lại phần chưa gửi. Bộ đếm về 0 lúc nửa đêm.
 - Một video làm lệnh gửi lỗi thì lần quét tạm dừng. Bấm Chạy tiếp mà vẫn lỗi đúng video đó thì app bỏ qua nó, video nằm ở nhóm Cần nghe lại.
 - Chọn gửi đoạn ngắn thì kết quả từng đoạn được lưu ngay ở `out/clips/`, nên lỗi giữa chừng rồi chạy lại không trả tiền lại các đoạn đã gửi. Mỗi video tối đa 30 đoạn.
 - Toàn máy chủ chỉ chạy một kênh một lúc, mỗi người chỉ có một lần quét dở. Đóng tab vẫn tiếp tục. App khởi động lại thì lần quét tạm dừng, phải bấm Chạy tiếp vì việc gửi AudD có tính phí.
@@ -129,6 +129,16 @@ docker compose exec music-audit /opt/venv/bin/audd login --device
 ```
 
 Mở trang và nhập mã mà lệnh in ra, chỉ cần giữ quyền đọc tài khoản và số liệu sử dụng. Phiên đăng nhập nằm trong volume `music-audit-data`, cập nhật app không làm mất. Số liệu được lưu tạm một phút. Công cụ lỗi hoặc chưa đăng nhập thì tab báo không có số liệu, việc quét không bị ảnh hưởng.
+
+### Ngân sách tháng
+
+Điền `AUDD_MONTHLY_BUDGET` và `AUDD_PRICE_PER_1000` trong `.env` để đặt trần chi phí AudD mỗi tháng cho cả app, xem `.env.example`. Tháng tính theo lịch, giờ Việt Nam.
+
+- Trước mỗi lần gửi AudD, server giữ chỗ số yêu cầu ước tính: video YouTube theo độ dài, file tải lên theo trần 60 phút, quét cả kênh theo số ở bước xác nhận. Không đủ thì từ chối và không gửi gì.
+- Quét xong thì tính theo số yêu cầu thật và trả lại phần thừa. Kết quả đã lưu không tính tiền. Lượt quét lỗi giữ nguyên phần đã tính, vì không biết AudD đã nhận bao nhiêu.
+- Hết ngân sách giữa lúc quét hàng loạt thì lô tạm dừng, các video chưa quét được giữ lại.
+- Sổ chi nằm ở `out/budget/<năm-tháng>.json`. Tab này hiện số đã chi, phần đang giữ chỗ, chia theo người dùng và kiểu quét, và cảnh báo khi qua `AUDD_BUDGET_WARN_PERCENT`.
+- Số trong app là ước tính theo giá đã điền. Hóa đơn của AudD mới là số chính thức.
 
 ## Kiểm tra nhạc
 
@@ -210,3 +220,5 @@ npm run library:additions
 | `src/catalog.ts` | Danh sách nguồn nhạc |
 | `src/csv.ts` | Đọc file CSV |
 | `scripts/` | Lệnh cập nhật danh sách YouTube Audio Library |
+| `src/budget.ts`, `src/BudgetPanel.tsx` | Phép tính và ô hiển thị ngân sách AudD tháng |
+| `server/monthlyBudget.ts` | Giữ chỗ, tính và lưu sổ chi ngân sách tháng |

@@ -3,7 +3,7 @@
  * Ghi qua file tạm rồi đổi tên, nên app dừng giữa lúc ghi cũng không làm hỏng file cũ. Các lần ghi đi lần lượt.
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
@@ -22,6 +22,20 @@ export function createStateFile<T>(getPath: () => string, label: string) {
       }
       try {
         return JSON.parse(await readFile(path, 'utf8')) as T;
+      } catch (error) {
+        console.error(`Không đọc được ${label}: ${errorText(error)}`);
+        return null;
+      }
+    },
+
+    /** Như read nhưng đọc ngay, cho bộ đếm cần biết số đã dùng trước khi trả lời yêu cầu. */
+    readSync(): T | null {
+      const path = getPath();
+      if (!existsSync(path)) {
+        return null;
+      }
+      try {
+        return JSON.parse(readFileSync(path, 'utf8')) as T;
       } catch (error) {
         console.error(`Không đọc được ${label}: ${errorText(error)}`);
         return null;

@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { LoaderCircle, RefreshCw, ShieldAlert } from 'lucide-react';
-import { Panel } from './components';
+import { BudgetPanel } from './BudgetPanel';
+import { costOfRequests, formatMoney, remainingBudgetRequests } from './budget';
+import { Figure, Panel } from './components';
 import { formatNumber as number } from './ui';
 import { audioLeftText, daysLeft, formatQuotaDate, isQuotaLow, percentUsed } from './quota';
 import type { QuotaAccount, QuotaResponse, QuotaStatus } from './quota';
@@ -14,16 +16,6 @@ const PROBLEMS: Record<Exclude<QuotaStatus, 'ok'>, string> = {
   missing: 'Máy chủ này chưa có công cụ audd nên chưa có số liệu. Bản chạy bằng Docker đã có sẵn. Việc quét vẫn chạy bình thường.',
   error: 'Chưa đọc được số liệu từ AudD. Việc quét vẫn chạy bình thường.',
 };
-
-function Figure({ label, value, hint, isMain = false }: { label: string; value: string; hint: string; isMain?: boolean }) {
-  return (
-    <div className={`min-w-0 rounded-xl p-3.5 ${isMain ? 'bg-brand-900' : 'bg-brand-50'}`}>
-      <p className={`text-xs font-medium ${isMain ? 'text-brand-100' : 'text-slate-600'}`}>{label}</p>
-      <p className={`text-[28px] leading-tight font-bold tabular-nums ${isMain ? 'text-white' : 'text-slate-900'}`}>{value}</p>
-      <p className={`text-xs tabular-nums ${isMain ? 'text-brand-100' : 'text-slate-500'}`}>{hint}</p>
-    </div>
-  );
-}
 
 function statePill(account: QuotaAccount | undefined): { className: string; label: string } {
   if (!account) {
@@ -85,6 +77,7 @@ export function QuotaTab() {
 
   return (
     <div className="grid gap-6">
+      {data?.budget && <BudgetPanel view={data.budget} />}
       <Panel className="space-y-5 p-5" aria-live="polite">
         <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
           <div className="min-w-0 flex-[1_1_16rem]">
@@ -142,6 +135,12 @@ export function QuotaTab() {
         <Panel className="space-y-3 p-5">
           <h2 className="text-sm font-semibold text-slate-900">Giới hạn trong app</h2>
           <div className="divide-y divide-slate-200">
+            {data.budget && (
+              <LimitRow label="Ngân sách còn lại tháng này (chung cả app)">
+                {formatMoney(costOfRequests(remainingBudgetRequests(data.budget), data.budget.pricePer1000), data.budget.currency)} /{' '}
+                {formatMoney(data.budget.amount, data.budget.currency)}
+              </LimitRow>
+            )}
             <LimitRow label="Lượt quét còn lại hôm nay của bạn">
               {number(data.remainingScans)} / {number(data.dailyLimit)}
             </LimitRow>

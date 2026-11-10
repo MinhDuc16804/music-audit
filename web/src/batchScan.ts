@@ -5,6 +5,7 @@
 
 import type { IdentifyResult } from './videoCheck.ts';
 import { getVideoUrl, parseYoutubeVideoId } from './youtubeLink.ts';
+import type { BudgetView } from './budget.ts';
 
 export const MAX_BATCH_VIDEOS = 20;
 /** Giới hạn quét mặc định của audit.py, dùng khi server chưa báo giới hạn thật. */
@@ -37,6 +38,8 @@ export interface BatchCurrentResponse {
   batch: Batch | null;
   remainingScans: number;
   dailyLimit: number;
+  /** Ngân sách AudD tháng này của cả app, null hoặc thiếu nếu chưa bật. */
+  budget?: BudgetView | null;
 }
 
 export interface BatchEstimateVideo {

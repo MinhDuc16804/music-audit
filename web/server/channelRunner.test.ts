@@ -38,8 +38,8 @@ function setup(overrides: Partial<ChannelRunnerDeps> = {}) {
     removeAudio: vi.fn(async () => undefined),
     logUsage: vi.fn(async () => undefined),
     maxRequests: 5000,
-    reserveRequests: vi.fn((_user: string, _count: number) => true),
-    releaseRequests: vi.fn((_user: string, _count: number) => undefined),
+    reserveRequests: vi.fn((_user: string, _count: number, _scanId: string): string | null => null),
+    releaseRequests: vi.fn((_user: string, _count: number, _scanId: string) => undefined),
     remainingRequests: vi.fn((_user: string) => 5000),
   };
   const deps = { ...fakes, ...overrides } as typeof fakes;
@@ -320,10 +320,10 @@ describe('createChannelRunner', () => {
     expect(runQueued.mock.calls.map(([, args]) => args[2])).toEqual(['--video-id=a', '--video-id=a', '--video-id=b']);
   });
 
-  it('vượt hạn mức quét kênh trong ngày thì không gửi gì', async () => {
-    const { deps, runner } = setup({ reserveRequests: vi.fn(() => false), remainingRequests: vi.fn(() => 3) });
+  it('vượt hạn mức hoặc ngân sách thì không gửi gì và báo đúng lý do', async () => {
+    const { deps, runner } = setup({ reserveRequests: vi.fn(() => 'Ngân sách tháng chỉ còn 3 yêu cầu.') });
     const scan = await startedAtGate(runner);
-    await expect(runner.send(USER, scan.id)).rejects.toMatchObject({ status: 429, message: expect.stringContaining('chỉ còn 3') });
+    await expect(runner.send(USER, scan.id)).rejects.toMatchObject({ status: 429, message: 'Ngân sách tháng chỉ còn 3 yêu cầu.' });
     expect((await runner.current(USER)).scan?.status).toBe('awaiting');
     expect(deps.runQueued).not.toHaveBeenCalled();
     expect(deps.logUsage).not.toHaveBeenCalled();
@@ -335,11 +335,11 @@ describe('createChannelRunner', () => {
     const { deps, runner } = setup({ runQueued });
     const scan = await startedAtGate(runner);
     await runner.send(USER, scan.id);
-    expect(deps.reserveRequests).toHaveBeenCalledWith(USER, 10);
+    expect(deps.reserveRequests).toHaveBeenCalledWith(USER, 10, scan.id);
     await runner.stop(USER, scan.id);
     release('Đã quét 1/1 video.');
     await waitForStatus(runner, 'done');
-    expect(deps.releaseRequests).toHaveBeenCalledWith(USER, 10);
+    expect(deps.releaseRequests).toHaveBeenCalledWith(USER, 10, scan.id);
   });
 
   it('dừng trước khi gửi thì không hoàn gì vì chưa giữ', async () => {
@@ -347,6 +347,15 @@ describe('createChannelRunner', () => {
     const scan = await startedAtGate(runner);
     await runner.stop(USER, scan.id);
     expect(deps.releaseRequests).not.toHaveBeenCalled();
+  });
+
+  it('quét hết thì báo kết thúc một lần, không hoàn gì', async () => {
+    const { deps, runner } = setup();
+    const scan = await startedAtGate(runner);
+    await runner.send(USER, scan.id);
+    await waitForStatus(runner, 'done');
+    expect(deps.releaseRequests).toHaveBeenCalledTimes(1);
+    expect(deps.releaseRequests).toHaveBeenCalledWith(USER, 0, scan.id);
   });
 
   it('người khác không thấy và không điều khiển được lần quét', async () => {

@@ -100,9 +100,10 @@ export interface ChannelRunnerDeps {
   /** scanId được ghi kèm để tab Lịch sử quét mở lại đúng báo cáo. */
   logUsage: (user: string, target: string, outcome: 'done' | 'error', scanId: string) => Promise<void>;
   maxRequests: number;
-  /** Giữ chỗ từng ấy yêu cầu AudD trong hạn mức quét kênh mỗi ngày của người này, trả về false nếu không đủ. */
-  reserveRequests: (user: string, count: number) => boolean;
-  releaseRequests: (user: string, count: number) => void;
+  /** Giữ chỗ từng ấy yêu cầu AudD (hạn mức ngày của người này và ngân sách tháng). Không đủ thì trả về câu báo lý do. */
+  reserveRequests: (user: string, count: number, scanId: string) => string | null;
+  /** Gọi một lần khi lần quét đã gửi kết thúc, count là phần chưa gửi được hoàn lại, 0 nếu quét hết. */
+  releaseRequests: (user: string, count: number, scanId: string) => void;
   remainingRequests: (user: string) => number;
 }
 
@@ -165,8 +166,8 @@ export function createChannelRunner(deps: ChannelRunnerDeps) {
 
   const finish = async (scan: ChannelScan, stoppedEarly: boolean) => {
     // Dừng giữa lúc gửi thì hoàn lại hạn mức của các video chưa gửi. Dừng trước khi gửi thì chưa giữ gì.
-    if (stoppedEarly && scan.sent && scan.options) {
-      deps.releaseRequests(scan.user, unsentRequests(scan.videos, scan.pendingIds, scan.options));
+    if (scan.sent && scan.options) {
+      deps.releaseRequests(scan.user, stoppedEarly ? unsentRequests(scan.videos, scan.pendingIds, scan.options) : 0, scan.id);
     }
     scan.status = 'done';
     scan.stoppedEarly = stoppedEarly;
@@ -355,11 +356,9 @@ export function createChannelRunner(deps: ChannelRunnerDeps) {
         throw new ChannelError(409, `Lần quét cần ${scan.gate.requests} yêu cầu AudD, vượt trần ${deps.maxRequests}.`);
       }
       requireIdle();
-      if (!deps.reserveRequests(user, scan.gate.requests)) {
-        throw new ChannelError(
-          429,
-          `Lần quét cần ${scan.gate.requests} yêu cầu AudD, nhưng hạn mức quét kênh hôm nay của bạn chỉ còn ${deps.remainingRequests(user)}. Hãy quét ít video hơn hoặc thử lại vào ngày mai.`,
-        );
+      const refusal = deps.reserveRequests(user, scan.gate.requests, scan.id);
+      if (refusal) {
+        throw new ChannelError(429, refusal);
       }
       // Đổi trạng thái ngay, trước mọi lệnh await, để lần bấm thứ hai gặp lỗi 409 thay vì chạy song song.
       scan.status = 'identifying';

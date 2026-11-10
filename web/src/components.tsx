@@ -26,6 +26,17 @@ export function SoundBars({ className = '' }: { className?: string }) {
   );
 }
 
+/** Một con số lớn kèm nhãn và chú thích, ô chính nền xanh đậm. */
+export function Figure({ label, value, hint, isMain = false }: { label: string; value: string; hint: string; isMain?: boolean }) {
+  return (
+    <div className={`min-w-0 rounded-xl p-3.5 ${isMain ? 'bg-brand-900' : 'bg-brand-50'}`}>
+      <p className={`text-xs font-medium ${isMain ? 'text-brand-100' : 'text-slate-600'}`}>{label}</p>
+      <p className={`text-[28px] leading-tight font-bold tabular-nums ${isMain ? 'text-white' : 'text-slate-900'}`}>{value}</p>
+      <p className={`text-xs tabular-nums ${isMain ? 'text-brand-100' : 'text-slate-500'}`}>{hint}</p>
+    </div>
+  );
+}
+
 export function IconBadge({ children }: { children: ReactNode }) {
   return <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-700">{children}</span>;
 }

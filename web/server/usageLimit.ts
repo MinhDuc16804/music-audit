@@ -1,7 +1,7 @@
 /**
  * Giới hạn số lượt quét mỗi ngày của từng người và ghi lại ai đã quét, vì cả công ty dùng chung một khóa AudD.
  * Tên người dùng lấy từ header của Cloudflare Access, nên chỉ tin được khi app nằm sau Access.
- * Bộ đếm nằm trong bộ nhớ: khởi động lại app thì đếm lại từ đầu.
+ * Bộ đếm được lưu ra file nếu có truyền nơi lưu, nên khởi động lại app trong ngày vẫn giữ số đã dùng.
  */
 
 import { appendFile, mkdir } from 'node:fs/promises';
@@ -42,16 +42,41 @@ export function getLimitDay(now: Date = new Date()): string {
   return DAY_FORMAT.format(now);
 }
 
-export function createDailyLimiter(maxPerDay: number, getToday: () => string = getLimitDay) {
+/** Số đã dùng trong ngày, lưu ra file để khởi động lại app không đếm lại từ đầu. */
+export interface DailyCounts {
+  day: string;
+  counts: Record<string, number>;
+}
+
+export interface DailyStore {
+  readSync(): DailyCounts | null;
+  write(value: DailyCounts): unknown;
+}
+
+export function createDailyLimiter(maxPerDay: number, getToday: () => string = getLimitDay, store?: DailyStore) {
   let day = '';
   let counts = new Map<string, number>();
+  let isLoaded = false;
 
   const startNewDayIfNeeded = () => {
     const today = getToday();
+    if (!isLoaded) {
+      isLoaded = true;
+      const saved = store?.readSync();
+      if (saved?.day === today && saved.counts && typeof saved.counts === 'object') {
+        day = today;
+        counts = new Map(Object.entries(saved.counts).filter(([, count]) => Number.isFinite(count) && count > 0));
+        return;
+      }
+    }
     if (today !== day) {
       day = today;
       counts = new Map();
     }
+  };
+
+  const save = () => {
+    void store?.write({ day, counts: Object.fromEntries(counts) });
   };
 
   /** Tính từng ấy lượt cho người này, đủ thì tính hết, không đủ thì trả về false và không tính lượt nào. */
@@ -62,6 +87,7 @@ export function createDailyLimiter(maxPerDay: number, getToday: () => string = g
       return false;
     }
     counts.set(user, used + count);
+    save();
     return true;
   };
 
@@ -74,6 +100,7 @@ export function createDailyLimiter(maxPerDay: number, getToday: () => string = g
   const release = (user: string, count: number): void => {
     startNewDayIfNeeded();
     counts.set(user, Math.max(0, (counts.get(user) ?? 0) - count));
+    save();
   };
 
   return Object.assign(take, { remaining, release, maxPerDay });

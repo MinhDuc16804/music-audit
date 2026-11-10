@@ -5,6 +5,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { isValidVideoId, MAX_BATCH_VIDEOS } from '../src/batchScan.ts';
+import { BUDGET_REFUSAL_TEXT } from '../src/budget.ts';
 import type { Batch, BatchItem } from '../src/batchScan.ts';
 import type { IdentifyResult } from '../src/videoCheck.ts';
 import { getVideoUrl } from '../src/youtubeLink.ts';
@@ -15,7 +16,8 @@ export const BATCH_ROUTE = '/api/batches';
 const DEFAULT_DELAY_MS = 5000;
 const MAX_STORED_BATCHES = 200;
 /** Khớp câu báo trong music_audit/extract.py. */
-const YOUTUBE_BLOCK_TEXT = 'YouTube đang chặn';
+/** Lỗi gặp lại ở mọi video sau, nên tạm dừng cả lô thay vì quét tiếp từng video cho lỗi. */
+const PAUSE_TEXTS = ['YouTube đang chặn', BUDGET_REFUSAL_TEXT];
 
 export type BatchRoute =
   | { action: 'current' }
@@ -75,7 +77,8 @@ export class BatchError extends Error {
 export interface BatchRunnerDeps {
   getFilePath: () => string;
   isCached: (videoId: string) => boolean;
-  scan: (url: string) => Promise<IdentifyResult>;
+  /** user là người tạo lô, để tính ngân sách đúng người. */
+  scan: (url: string, user: string) => Promise<IdentifyResult>;
   /** Giữ chỗ từng ấy lượt, trả về false nếu không đủ. */
   reserve: (user: string, count: number) => boolean;
   release: (user: string, count: number) => void;
@@ -133,13 +136,13 @@ export function createBatchRunner(deps: BatchRunnerDeps) {
     item.status = 'running';
     await persist();
     try {
-      item.result = await deps.scan(item.url);
+      item.result = await deps.scan(item.url, batch.user);
       item.status = 'done';
       await deps.logResult(batch.user, item.url, 'done');
     } catch (error) {
       item.status = 'error';
       item.error = error instanceof Error ? error.message : 'Không quét được.';
-      if (item.error.includes(YOUTUBE_BLOCK_TEXT)) {
+      if (PAUSE_TEXTS.some((text) => item.error?.includes(text))) {
         batch.status = 'paused';
         batch.pauseReason = item.error;
       }

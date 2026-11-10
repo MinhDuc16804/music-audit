@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { ListVideo, LoaderCircle, Search, ShieldAlert, Tv, Video } from 'lucide-react';
 import { formatDuration } from './batchScan';
+import { budgetRefusal, costOfRequests, formatMoney, remainingBudgetRequests } from './budget';
+import type { BudgetView } from './budget';
 import { ChannelResult, PastScans } from './ChannelReport';
 import { MAX_CLIPS, MIN_CLIPS, parseChannelInput, pickPrepared, searchChannelVideos, worstCaseRequests } from './channelScan';
 import type { ChannelCurrentResponse, ChannelOptions, ChannelRequirements, ChannelScanView, ChannelStatus, ChannelVideo } from './channelScan';
@@ -188,6 +190,7 @@ function RunPanel({
   scan,
   maxRequests,
   remainingRequests,
+  budget,
   isBusy,
   onAction,
   onNew,
@@ -195,6 +198,8 @@ function RunPanel({
   scan: ChannelScanView;
   maxRequests: number;
   remainingRequests: number;
+  /** Ngân sách AudD tháng này, null nếu chưa bật. */
+  budget: BudgetView | null;
   /** Đang chờ máy chủ trả lời lần bấm trước, khóa các nút để không gửi hai lần. */
   isBusy: boolean;
   onAction: (path: string) => void;
@@ -214,6 +219,7 @@ function RunPanel({
   const gate = scan.gate;
   const isOverLimit = Boolean(gate && gate.requests > maxRequests);
   const isOverDaily = Boolean(gate && !isOverLimit && gate.requests > remainingRequests);
+  const isOverBudget = Boolean(gate && budget && !isOverLimit && !isOverDaily && gate.requests > remainingBudgetRequests(budget));
   const subtitle =
     scan.status === 'done'
       ? scan.stoppedEarly
@@ -278,6 +284,18 @@ function RunPanel({
             {gate.noAudio > 0 && <>{number(gate.noAudio)} video không tải được âm thanh sẽ nằm ở nhóm Cần nghe lại. </>}
             Sẽ gửi <b className="tabular-nums">{number(gate.videos)}</b> video, dùng khoảng <b className="tabular-nums">{number(gate.requests)}</b> yêu cầu AudD.
           </p>
+          {budget && gate.requests > 0 && (
+            <p>
+              Chi phí tối đa <b className="tabular-nums">{formatMoney(costOfRequests(gate.requests, budget.pricePer1000), budget.currency)}</b>. Ngân sách tháng còn{' '}
+              <b className="tabular-nums">
+                {isOverBudget
+                  ? formatMoney(costOfRequests(remainingBudgetRequests(budget), budget.pricePer1000), budget.currency)
+                  : `${formatMoney(costOfRequests(remainingBudgetRequests(budget) - gate.requests, budget.pricePer1000), budget.currency)} sau khi quét`}
+              </b>
+              .
+            </p>
+          )}
+          {isOverBudget && budget && gate && <p className="text-rose-700">{budgetRefusal(gate.requests, budget)}</p>}
           {isOverDaily && (
             <p className="text-rose-700">
               Hạn mức quét kênh hôm nay của bạn chỉ còn {number(remainingRequests)} yêu cầu. Hãy dừng ở đây và quét ít video hơn, hoặc thử lại vào ngày mai.
@@ -289,7 +307,7 @@ function RunPanel({
             </p>
           )}
           <div className="flex flex-wrap gap-2">
-            <button type="button" disabled={isOverLimit || isOverDaily || isBusy} onClick={() => onAction(`/${scan.id}/send`)} className={PRIMARY_BUTTON}>
+            <button type="button" disabled={isOverLimit || isOverDaily || isOverBudget || isBusy} onClick={() => onAction(`/${scan.id}/send`)} className={PRIMARY_BUTTON}>
               {gate.videos === 0 ? 'Xem báo cáo' : 'Gửi nhận diện'}
             </button>
             <button type="button" disabled={isBusy} onClick={() => onAction(`/${scan.id}/stop`)} className={SMALL_BUTTON}>
@@ -531,6 +549,7 @@ export function ChannelTab() {
             scan={scan}
             maxRequests={state?.maxRequests ?? 0}
             remainingRequests={state?.remainingRequests ?? 0}
+            budget={state?.budget ?? null}
             isBusy={isBusy}
             onAction={(path) => void run(() => post(path))}
             onNew={() => {

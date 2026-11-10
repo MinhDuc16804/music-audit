@@ -5,6 +5,7 @@
 
 import { csvCell, formatDuration } from './batchScan.ts';
 import { foldText } from './textNormalize.ts';
+import type { BudgetView } from './budget.ts';
 
 const CLIP_EVERY_SECONDS = 45;
 export const MIN_CLIPS = 2;
@@ -94,6 +95,8 @@ export interface ChannelCurrentResponse {
   maxRequests: number;
   /** Số yêu cầu AudD người này còn dùng được cho quét cả kênh hôm nay. */
   remainingRequests: number;
+  /** Ngân sách AudD tháng này của cả app, null hoặc thiếu nếu chưa bật. */
+  budget?: BudgetView | null;
 }
 
 export interface ChannelRequirements {

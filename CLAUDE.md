@@ -29,6 +29,7 @@ Nạp chúng trong `music_audit/detect.py` khi chạy thật, không import ở 
 - `web/`: web app nhận link hoặc file, nhận diện bằng AudD qua server của Vite rồi đối chiếu với YouTube Audio Library.
 - `music_audit/extract.py`: tách mp3 từ một video YouTube cho `identify --extract`, gọi `yt-dlp` như công cụ ngoài.
 - `web/server/channelRunner.ts`: tab Quét cả kênh, gọi `download-audio`, `detect-music`, rồi `submit --video-id` từng video sau khi có người xác nhận chi phí. Không được bỏ bước xác nhận hay tự chạy tiếp sau khi khởi động lại.
+- `web/server/monthlyBudget.ts`: trần chi phí AudD mỗi tháng cho cả app (`AUDD_MONTHLY_BUDGET`). Cấu hình sai thì chặn hết, không thành không giới hạn. Lượt quét lỗi giữ nguyên phần đã tính.
 - `Dockerfile`, `compose.yml`: đóng gói web app. `web/server/productionServer.ts` là server chạy thật.
 - `music_audit/detect.py`: máy lọc có nhạc hay không (YAMNet) và chọn đoạn cắt cho `--clips`.
 - `music_audit/grouping.py`: lệnh `export`, gom theo bài (`songs.csv`) và báo cáo mỗi video một dòng (`bao-cao-quet.csv`). Thông tin Studio (Library, Policy) không bao giờ đưa video vào `sach`.

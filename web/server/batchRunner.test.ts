@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Batch } from '../src/batchScan';
+import { BUDGET_REFUSAL_TEXT } from '../src/budget';
 import type { IdentifyResult } from '../src/videoCheck';
 import { BatchError, createBatchRunner, matchBatchRoute, parseBatchVideoIds } from './batchRunner';
 import type { BatchRunnerDeps } from './batchRunner';
@@ -148,6 +149,17 @@ describe('createBatchRunner', () => {
     await runner.resume(USER, id);
     const done = await waitFor(runner, ({ status }) => status === 'done');
     expect(done.items.map(({ status }) => status)).toEqual(['error', 'done', 'done']);
+  });
+
+  it('hết ngân sách tháng thì tạm dừng cả lô', async () => {
+    const scan = vi.fn(async () => {
+      throw new Error(`Lượt quét cần tối đa 90 yêu cầu AudD, nhưng ${BUDGET_REFUSAL_TEXT} 5 yêu cầu.`);
+    });
+    const { runner } = setup({ scan });
+    await runner.create(USER, [A, B]);
+    const paused = await waitFor(runner, ({ status }) => status === 'paused');
+    expect(paused.items.map(({ status }) => status)).toEqual(['error', 'queued']);
+    expect(paused.pauseReason).toContain(BUDGET_REFUSAL_TEXT);
   });
 
   it('quét lại video lỗi không tính thêm lượt', async () => {

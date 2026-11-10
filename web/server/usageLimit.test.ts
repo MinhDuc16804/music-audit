@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { appendUsage, createDailyLimiter, getLimitDay, getUserEmail, parseDailyLimit } from './usageLimit.ts';
+import type { DailyCounts } from './usageLimit.ts';
 
 describe('getUserEmail', () => {
   it('đọc email từ Cloudflare Access và chuẩn hóa', () => {
@@ -31,6 +32,35 @@ describe('getLimitDay', () => {
   it('đổi ngày lúc nửa đêm giờ Việt Nam', () => {
     expect(getLimitDay(new Date('2026-11-07T16:59:59Z'))).toBe('2026-11-07');
     expect(getLimitDay(new Date('2026-11-07T17:00:00Z'))).toBe('2026-11-08');
+  });
+});
+
+describe('createDailyLimiter lưu ra file', () => {
+  const memoryStore = (saved: DailyCounts | null) => {
+    const store = { saved, readSync: () => store.saved, write: (value: DailyCounts) => void (store.saved = value) };
+    return store;
+  };
+
+  it('khởi động lại trong ngày vẫn giữ số đã dùng', () => {
+    const store = memoryStore(null);
+    const first = createDailyLimiter(3, () => '2026-11-10', store);
+    first('a', 2);
+    const restarted = createDailyLimiter(3, () => '2026-11-10', store);
+    expect(restarted.remaining('a')).toBe(1);
+    expect([restarted('a'), restarted('a')]).toEqual([true, false]);
+  });
+
+  it('số đã lưu của ngày khác thì bỏ', () => {
+    const allow = createDailyLimiter(3, () => '2026-11-10', memoryStore({ day: '2026-11-09', counts: { a: 3 } }));
+    expect(allow.remaining('a')).toBe(3);
+  });
+
+  it('hoàn lượt cũng được lưu', () => {
+    const store = memoryStore(null);
+    const allow = createDailyLimiter(5, () => '2026-11-10', store);
+    allow('a', 4);
+    allow.release('a', 3);
+    expect(store.saved).toEqual({ day: '2026-11-10', counts: { a: 1 } });
   });
 });
 

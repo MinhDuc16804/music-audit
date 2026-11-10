@@ -1,5 +1,7 @@
 /** Phần dùng chung giữa trình duyệt và server cho tab Theo dõi hạn mức. */
 
+import type { BudgetView } from './budget.ts';
+
 const SECONDS_PER_REQUEST = 12;
 const DAY_MS = 86_400_000;
 export const QUOTA_LOW_PERCENT = 90;
@@ -31,6 +33,8 @@ export interface QuotaResponse extends QuotaReading {
   /** Số yêu cầu AudD người này còn dùng được cho quét cả kênh hôm nay. */
   remainingChannelRequests: number;
   dailyChannelRequests: number;
+  /** Ngân sách AudD tháng này của cả app, null nếu chưa bật. */
+  budget: BudgetView | null;
 }
 
 export function percentUsed(account: QuotaAccount): number {
