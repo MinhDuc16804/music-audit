@@ -17,6 +17,8 @@ const STUDIO_STANDARD_LICENSE = 'yt-audio-library';
 
 /** Tên ngắn phải có ít nhất từng này từ mới được coi là cách viết khác của tên dài. */
 const MIN_PARTIAL_NAME_WORDS = 2;
+/** Tên dài hơn tối đa từng này từ, ví dụ thêm tên đệm. */
+const MAX_EXTRA_NAME_WORDS = 1;
 
 /** YouTube thêm bài mới hai lần mỗi tháng, nên danh sách quá từng này ngày thì coi là cũ. */
 const LIBRARY_STALE_AFTER_DAYS = 30;
@@ -55,23 +57,50 @@ function getTrackKey(title: string, artist: string): string {
   return `${normalizeText(title)}\u0000${normalizeText(artist)}`;
 }
 
-/** Dịch vụ nhận diện gộp nghệ sĩ vào một chuỗi, nên thử cả chuỗi đầy đủ lẫn từng tên. */
-export function getArtistCandidates(artists: string): string[] {
-  return [...new Set([artists, ...artists.split(/,|&|\/|\band\b|\bfeat\.?\s|\bft\.?\s/i)].map((name) => name.trim()))].filter(Boolean);
+/**
+ * Dịch vụ nhận diện gộp nghệ sĩ vào một chuỗi, nên thử cả chuỗi đầy đủ lẫn từng tên.
+ * Danh sách thư viện chỉ tách theo dấu phẩy và gạch chéo: "&" và "and" thường là một phần tên nhóm, như "Density & Time".
+ * Tách theo "&" sẽ ra tên một từ như "Time", dễ trùng một nghệ sĩ thương mại.
+ */
+export function getArtistCandidates(artists: string, isLibrary = false): string[] {
+  const separator = isLibrary ? /,|\// : /,|&|\/|\band\b|\bfeat\.?\s|\bft\.?\s/i;
+  return [...new Set([artists, ...artists.split(separator)].map((name) => name.trim()))].filter(Boolean);
 }
 
-/** Cùng tên, hoặc một tên có đủ các từ của tên kia, như "Patrick Patrikios" và "Patrick Jordan Patrikios". */
+/** Bỏ chữ "The" ở đầu tên nhóm, như "The U.S. Army Band". */
+function nameWords(name: string): string[] {
+  const words = normalizeText(name).split(' ').filter(Boolean);
+  return words[0] === 'the' && words.length > 1 ? words.slice(1) : words;
+}
+
+/**
+ * Cùng tên, hoặc tên dài chỉ thêm đúng một từ đệm ở giữa, như "Patrick Patrikios" và "Patrick Jordan Patrikios".
+ * Từ đầu và từ cuối phải trùng, để "Kevin MacLeod" không khớp "Kevin MacLeod Tribute Orchestra".
+ */
 export function isSameArtistName(first: string, second: string): boolean {
-  const [shorter, longer] = [first, second]
-    .map((name) => normalizeText(name).split(' ').filter(Boolean))
-    .sort((a, b) => a.length - b.length);
+  const [shorter, longer] = [first, second].map(nameWords).sort((a, b) => a.length - b.length);
   if (shorter.length === 0) {
     return false;
   }
   if (shorter.length === longer.length) {
     return shorter.join(' ') === longer.join(' ');
   }
-  return shorter.length >= MIN_PARTIAL_NAME_WORDS && shorter.every((word) => longer.includes(word));
+  return (
+    shorter.length >= MIN_PARTIAL_NAME_WORDS &&
+    longer.length - shorter.length <= MAX_EXTRA_NAME_WORDS &&
+    shorter[0] === longer[0] &&
+    shorter.at(-1) === longer.at(-1) &&
+    isInOrder(shorter, longer)
+  );
+}
+
+/** Các từ của tên ngắn nằm trong tên dài theo đúng thứ tự. */
+function isInOrder(shorter: string[], longer: string[]): boolean {
+  let position = 0;
+  return shorter.every((word) => {
+    position = longer.indexOf(word, position) + 1;
+    return position > 0;
+  });
 }
 
 function addToGroup(groups: Map<string, AudioLibraryTrack[]>, key: string, track: AudioLibraryTrack) {
@@ -88,10 +117,17 @@ export function buildAudioLibraryIndex(tracks: AudioLibraryTrack[]): AudioLibrar
 }
 
 /** Tìm bài khớp chắc. Album chỉ dùng để so với tên nghệ sĩ trong thư viện. */
+/**
+ * Khớp chắc khi trùng tên bài và trùng nghệ sĩ. Album chỉ được tính khi trùng hẳn tên nghệ sĩ trong thư viện
+ * (AudD đôi khi ghi tác giả ở ô nghệ sĩ và tên kênh phát hành ở ô album), không tính album chỉ chứa tên đó như "Best of …".
+ */
 export function findAudioLibraryTrack(title: string, artists: string, index: AudioLibraryIndex, album = ''): AudioLibraryTrack | undefined {
-  const names = [...getArtistCandidates(artists), album].filter(Boolean);
+  const names = getArtistCandidates(artists);
+  const albumName = nameWords(album).join(' ');
   return index.byTitle.get(normalizeText(title))?.find((track) =>
-    getArtistCandidates(track.artist).some((libraryName) => names.some((name) => isSameArtistName(libraryName, name))),
+    getArtistCandidates(track.artist, true).some(
+      (libraryName) => names.some((name) => isSameArtistName(libraryName, name)) || (albumName !== '' && nameWords(libraryName).join(' ') === albumName),
+    ),
   );
 }
 

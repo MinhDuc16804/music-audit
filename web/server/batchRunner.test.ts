@@ -200,26 +200,41 @@ describe('createBatchRunner', () => {
     await waitFor(runner, ({ status }) => status === 'done');
   });
 
-  it('khởi động lại thì quét tiếp từ file đã lưu', async () => {
-    const saved: Batch[] = [{
-      id: 'cu',
-      user: USER,
-      createdAt: '2026-11-09T00:00:00.000Z',
-      status: 'running',
-      items: [
-        { videoId: A, url: `https://www.youtube.com/watch?v=${A}`, status: 'running', cached: false },
-        { videoId: B, url: `https://www.youtube.com/watch?v=${B}`, status: 'done', cached: false },
-      ],
-    }];
+  const writeSaved = async (items: Batch['items']) => {
+    const saved: Batch[] = [{ id: 'cu', user: USER, createdAt: '2026-11-09T00:00:00.000Z', status: 'running', items }];
     const { mkdir } = await import('node:fs/promises');
     await mkdir(join(folder, 'out'), { recursive: true });
     await writeFile(filePath, JSON.stringify(saved), 'utf8');
+  };
+  const item = (videoId: string, status: Batch['items'][number]['status']) => ({
+    videoId,
+    url: `https://www.youtube.com/watch?v=${videoId}`,
+    status,
+    cached: false,
+  });
 
+  it('khởi động lại giữa lúc quét thì không tự gửi lại video đang dở, video đó thành lỗi để người dùng quyết', async () => {
+    await writeSaved([item(A, 'running'), item(B, 'done')]);
     const { deps, runner } = setup();
     await runner.start();
-    const batch = await waitFor(runner, ({ status }) => status === 'done');
+    const batch = (await runner.current(USER)) as Batch;
+    expect(deps.scan).not.toHaveBeenCalled();
+    expect(batch.items.map(({ status }) => status)).toEqual(['error', 'done']);
+    expect(batch.items[0].error).toContain('Quét lại');
+    expect(batch.status).toBe('done');
+  });
+
+  it('khởi động lại khi lô còn video chờ thì tạm dừng, chỉ chạy tiếp khi có người bấm', async () => {
+    await writeSaved([item(A, 'running'), item(B, 'queued')]);
+    const { deps, runner } = setup();
+    await runner.start();
+    const paused = (await runner.current(USER)) as Batch;
+    expect(paused.status).toBe('paused');
+    expect(deps.scan).not.toHaveBeenCalled();
+    await runner.resume(USER, 'cu');
+    const done = await waitFor(runner, ({ status }) => status === 'done');
     expect(deps.scan).toHaveBeenCalledTimes(1);
-    expect(batch.items.map(({ status }) => status)).toEqual(['done', 'done']);
+    expect(done.items.map(({ status }) => status)).toEqual(['error', 'done']);
     const stored = JSON.parse(await readFile(filePath, 'utf8')) as Batch[];
     expect(stored[0].status).toBe('done');
   });

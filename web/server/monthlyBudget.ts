@@ -30,6 +30,7 @@ export interface BudgetLedger {
 }
 
 export interface BudgetStore {
+  /** Chưa có sổ thì trả về null. Sổ có mà hỏng hay không đọc được thì báo lỗi. */
   readSync(month: string): BudgetLedger | null;
   write(ledger: BudgetLedger): unknown;
 }
@@ -113,9 +114,16 @@ export function getBudgetRequests(config: BudgetConfig): number {
 
 const emptyLedger = (month: string): BudgetLedger => ({ month, charged: 0, byUser: {}, byKind: {} });
 
-const cleanLedger = (saved: BudgetLedger | null, month: string): BudgetLedger => {
-  if (!saved || saved.month !== month || !Number.isFinite(saved.charged)) {
+const isCountMap = (value: unknown) =>
+  typeof value === 'object' && value !== null && Object.values(value).every((count) => typeof count === 'number' && Number.isFinite(count));
+
+/** Sổ đúng định dạng của đúng tháng. Sai thì coi là hỏng, không bao giờ coi là sổ trống. */
+const readLedger = (saved: BudgetLedger | null, month: string): BudgetLedger => {
+  if (saved === null) {
     return emptyLedger(month);
+  }
+  if (saved.month !== month || typeof saved.charged !== 'number' || !Number.isFinite(saved.charged) || !isCountMap(saved.byUser) || !isCountMap(saved.byKind)) {
+    throw new Error('Sổ chi sai định dạng');
   }
   return { month, charged: Math.max(0, saved.charged), byUser: { ...saved.byUser }, byKind: { ...saved.byKind } };
 };
@@ -124,17 +132,34 @@ export function createMonthlyBudget(config: BudgetConfig, store: BudgetStore, ge
   const budgetRequests = getBudgetRequests(config);
   let ledger: BudgetLedger | null = null;
   let held = 0;
+  /** Tháng có sổ chi hỏng. Khi đó chặn mọi lượt quét và không ghi đè sổ, tới khi người quản trị sửa file. */
+  let brokenMonth: string | null = null;
 
   const current = () => {
     const month = getMonth();
-    if (ledger?.month !== month) {
-      ledger = cleanLedger(store.readSync(month), month);
+    // Sổ hỏng thì đọc lại mỗi lần, để sửa file xong là dùng được ngay, không cần khởi động lại.
+    if (ledger?.month !== month || brokenMonth === month) {
+      try {
+        ledger = readLedger(store.readSync(month), month);
+        brokenMonth = null;
+      } catch {
+        if (brokenMonth !== month) {
+          console.error(`Sổ chi AudD tháng ${month} không đọc được, app chặn mọi lượt quét tới khi sửa file.`);
+        }
+        ledger = emptyLedger(month);
+        brokenMonth = month;
+      }
       held = 0;
     }
     return ledger;
   };
 
+  const isBroken = () => current().month === brokenMonth;
+
   const add = (book: BudgetLedger, user: string, kind: BudgetKind, requests: number) => {
+    if (book.month === brokenMonth) {
+      return;
+    }
     book.charged = Math.max(0, book.charged + requests);
     book.byUser[user] = Math.max(0, (book.byUser[user] ?? 0) + requests);
     book.byKind[kind] = Math.max(0, (book.byKind[kind] ?? 0) + requests);
@@ -143,10 +168,12 @@ export function createMonthlyBudget(config: BudgetConfig, store: BudgetStore, ge
 
   return {
     /** Giữ chỗ từng ấy yêu cầu. Không đủ thì trả về null và không giữ gì. */
+    isBroken,
+
     reserve(user: string, kind: BudgetKind, requests: number): BudgetHold | null {
       const book = current();
       const count = Math.max(0, Math.ceil(requests));
-      if (book.charged + count > budgetRequests) {
+      if (isBroken() || book.charged + count > budgetRequests) {
         return null;
       }
       add(book, user, kind, count);
@@ -173,7 +200,7 @@ export function createMonthlyBudget(config: BudgetConfig, store: BudgetStore, ge
     },
 
     remaining(): number {
-      return Math.max(0, budgetRequests - current().charged);
+      return isBroken() ? 0 : Math.max(0, budgetRequests - current().charged);
     },
 
     view(): BudgetView {
@@ -194,6 +221,7 @@ export function createMonthlyBudget(config: BudgetConfig, store: BudgetStore, ge
         heldRequests: Math.min(held, book.charged),
         byUser: sorted(Object.entries(book.byUser)).map(([user, requests]) => ({ user, requests })),
         byKind: sorted(Object.entries(book.byKind) as [BudgetKind, number][]).map(([kind, requests]) => ({ kind, requests })),
+        ...(isBroken() ? { isBroken: true } : {}),
       };
     },
   };

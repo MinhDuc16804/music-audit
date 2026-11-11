@@ -75,7 +75,8 @@ Cần có tên miền công ty đang quản lý trên Cloudflare. Các bước l
 3. **Tạo ứng dụng Access.** Access > Applications > Add an application > Self-hosted, tên miền đúng như bước 2.
    Thêm policy Allow, Include chọn **Emails ending in** và điền đuôi email công ty, hoặc **Emails** để liệt kê từng người.
    Login methods để **One-time PIN**, thêm Google nếu công ty dùng Google Workspace.
-4. **Chép hai giá trị vào `.env`.** `CF_ACCESS_TEAM_DOMAIN` là tên miền đội ở bước 1, `CF_ACCESS_AUD` là Application Audience (AUD) Tag trong trang ứng dụng ở bước 3.
+4. **Chép ba giá trị vào `.env`.** `CF_ACCESS_TEAM_DOMAIN` là tên miền đội ở bước 1, `CF_ACCESS_AUD` là Application Audience (AUD) Tag trong trang ứng dụng ở bước 3,
+   `APP_HOSTNAMES` là tên miền của app ở bước 2. App chỉ trả lời localhost và các tên miền trong `APP_HOSTNAMES`, để trang độc không trỏ được tên miền của nó về app.
 5. **Chạy app kèm đường hầm:**
 
 ```bash

@@ -144,6 +144,54 @@ describe('createMonthlyBudget', () => {
     expect(byKind.map(({ kind }) => kind)).toEqual(['channel', 'batch', 'link']);
   });
 
+  it('sổ chi hỏng thì chặn mọi lượt quét, không đếm lại từ 0 và không ghi đè file', () => {
+    const store = memoryStore();
+    store.readSync.mockImplementation(() => {
+      throw new SyntaxError('JSON hỏng');
+    });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const budget = createMonthlyBudget(CONFIG, store, () => '2026-11');
+    expect(budget.isBroken()).toBe(true);
+    expect(budget.reserve('a', 'link', 1)).toBeNull();
+    expect(budget.remaining()).toBe(0);
+    expect(budget.view().isBroken).toBe(true);
+    expect(store.write).not.toHaveBeenCalled();
+    error.mockRestore();
+  });
+
+  it('sổ chi sai định dạng cũng coi là hỏng', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    for (const saved of [
+      { month: '2026-10', charged: 10, byUser: {}, byKind: {} },
+      { month: '2026-11', charged: 'abc', byUser: {}, byKind: {} },
+      { month: '2026-11', charged: 10, byUser: { a: 'x' }, byKind: {} },
+    ]) {
+      const store = memoryStore();
+      store.readSync.mockImplementation(() => saved as unknown as BudgetLedger);
+      const budget = createMonthlyBudget(CONFIG, store, () => '2026-11');
+      expect(budget.isBroken()).toBe(true);
+    }
+    error.mockRestore();
+  });
+
+  it('sửa xong file thì dùng lại được ngay, không cần khởi động lại', () => {
+    const store = memoryStore();
+    let isBrokenFile = true;
+    store.readSync.mockImplementation((month: string) => {
+      if (isBrokenFile) {
+        throw new SyntaxError('JSON hỏng');
+      }
+      return { month, charged: 50, byUser: {}, byKind: {} };
+    });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const budget = createMonthlyBudget(CONFIG, store, () => '2026-11');
+    expect(budget.reserve('a', 'link', 1)).toBeNull();
+    isBrokenFile = false;
+    expect(budget.remaining()).toBe(150);
+    expect(budget.reserve('a', 'link', 1)).not.toBeNull();
+    error.mockRestore();
+  });
+
   it('ngân sách 0 thì chặn mọi lượt quét', () => {
     const budget = createMonthlyBudget({ ...CONFIG, amount: 0 }, memoryStore(), () => '2026-11');
     expect(budget.reserve('a', 'link', 1)).toBeNull();

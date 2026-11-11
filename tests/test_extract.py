@@ -85,3 +85,20 @@ class ExtractAudioTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MediaDurationTests(unittest.TestCase):
+    def test_reads_duration_line_from_ffmpeg(self):
+        output = "Input #0, mp3, from 'bai.mp3':\n  Duration: 00:03:12.34, start: 0.000000, bitrate: 128 kb/s\n"
+        self.assertAlmostEqual(extract.parse_ffmpeg_duration(output), 192.34)
+        self.assertEqual(extract.parse_ffmpeg_duration("Duration: 01:00:00.00,"), 3600)
+
+    def test_unknown_duration_is_zero(self):
+        self.assertEqual(extract.parse_ffmpeg_duration("Duration: N/A, bitrate: N/A"), 0)
+        self.assertEqual(extract.parse_ffmpeg_duration(""), 0)
+
+    def test_missing_ffmpeg_gives_zero_instead_of_error(self):
+        with mock.patch.object(extract, "find_ffmpeg", return_value=""):
+            self.assertEqual(extract.media_duration("bai.mp3"), 0)
+        with mock.patch.object(extract, "find_ffmpeg", return_value="ffmpeg-khong-co-that"):
+            self.assertEqual(extract.media_duration("bai.mp3"), 0)

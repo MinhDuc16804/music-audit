@@ -268,6 +268,14 @@ class BulkFlowTests(ServerTestCase):
         self.assertNotIn("Lỗi với", again.stdout)
         self.assertEqual(len(FakeAudd.requests), 1)
 
+    def test_zero_or_negative_chunk_limit_stops_before_sending(self):
+        self.write_all_videos([("song0000001", 30)])
+        for value in ("0", "-1", "abc"):
+            result = self.run_cli("submit", "--delay", "0", "--all-videos", check=False, extra_env={"AUDD_MAX_CHUNKS": value})
+            self.assertNotEqual(result.returncode, 0, value)
+            self.assertIn("AUDD_MAX_CHUNKS", result.stderr)
+        self.assertEqual(FakeAudd.requests, [])
+
     def test_long_video_keeps_cost_limit_and_warns(self):
         self.write_all_videos([("song0000001", 3600)])
         result = self.run_cli("submit", "--delay", "0", "--all-videos", extra_env={"AUDD_MAX_CHUNKS": "25"})

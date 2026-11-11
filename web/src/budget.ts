@@ -5,6 +5,9 @@
 
 import { SCAN_SEGMENT_SECONDS } from './videoCheck.ts';
 
+/** Trần quét mặc định mỗi video, 300 đoạn 12 giây, khớp DEFAULT_AUDD_MAX_CHUNKS bên Python. */
+const DEFAULT_CAP_SECONDS = 3600;
+
 export type BudgetKind = 'link' | 'file' | 'batch' | 'channel';
 
 export const BUDGET_KIND_LABELS: Record<BudgetKind, string> = {
@@ -37,13 +40,17 @@ export interface BudgetView {
   heldRequests: number;
   byUser: { user: string; requests: number }[];
   byKind: { kind: BudgetKind; requests: number }[];
+  /** Sổ chi tháng này hỏng: app chặn mọi lượt quét tới khi sửa file. */
+  isBroken?: boolean;
 }
 
 export type BudgetState = 'ok' | 'warn' | 'full';
 
 /** Số yêu cầu AudD cho từng ấy giây âm thanh, không vượt trần mỗi lần quét. Chưa biết độ dài thì tính trần. */
 export function requestsForSeconds(seconds: number, maxSeconds: number): number {
-  const length = seconds > 0 ? Math.min(seconds, maxSeconds) : maxSeconds;
+  // Trần sai (0 hay âm) thì không tin, tính theo mặc định 60 phút để không ghi thiếu tiền.
+  const cap = maxSeconds > 0 ? maxSeconds : DEFAULT_CAP_SECONDS;
+  const length = seconds > 0 ? Math.min(seconds, cap) : cap;
   return Math.max(1, Math.ceil(length / SCAN_SEGMENT_SECONDS));
 }
 
@@ -69,7 +76,7 @@ export function includedLeft(view: BudgetView): number {
 
 /** Số yêu cầu còn được gửi trong tháng. */
 export function remainingBudgetRequests(view: BudgetView): number {
-  return Math.max(0, view.budgetRequests - view.chargedRequests);
+  return view.isBroken ? 0 : Math.max(0, view.budgetRequests - view.chargedRequests);
 }
 
 /** Đã chi thật, chưa tính phần đang giữ chỗ. */
@@ -78,7 +85,7 @@ export function spentRequests(view: BudgetView): number {
 }
 
 export function budgetState(view: BudgetView): BudgetState {
-  if (remainingBudgetRequests(view) === 0) {
+  if (view.isBroken || remainingBudgetRequests(view) === 0) {
     return 'full';
   }
   return view.budgetRequests > 0 && (view.chargedRequests / view.budgetRequests) * 100 >= view.warnPercent ? 'warn' : 'ok';

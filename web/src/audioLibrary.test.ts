@@ -49,6 +49,16 @@ describe('findAudioLibraryTrack', () => {
     expect(findAudioLibraryTrack('Universal', 'Daniele Matracia', index, 'Album Khac')).toBeUndefined();
   });
 
+  it('album chỉ chứa tên nghệ sĩ thư viện thì không tính là khớp', () => {
+    expect(findAudioLibraryTrack('Ten Dem', 'Some Choir', index, 'Best of Patrick Jordan Patrikios')).toBeUndefined();
+    expect(findAudioLibraryTrack('Universal', 'Some Choir', index, 'Vibe Tracks Greatest Hits')).toBeUndefined();
+  });
+
+  it('không tách tên nhóm có "&" trong thư viện thành tên một từ', () => {
+    expect(findAudioLibraryTrack('Hai Ten', 'Time', index)).toBeUndefined();
+    expect(findAudioLibraryTrack('Hai Ten', 'Density', index)).toBeUndefined();
+  });
+
   it('khớp khi thư viện ghi nhiều tên trong một chuỗi', () => {
     expect(findAudioLibraryTrack('Hai Ten', 'Density & Time', index)).toBeDefined();
     expect(findAudioLibraryTrack('Hai Ten', 'The Grey Room', index)).toBeDefined();
@@ -85,6 +95,13 @@ describe('isSameArtistName', () => {
     expect(isSameArtistName('U.S. Army Band', 'The U.S. Army Band')).toBe(true);
   });
 
+  it('tên dài hơn mà khác từ đầu hoặc từ cuối, hay thêm quá một từ, thì không phải cùng người', () => {
+    expect(isSameArtistName('Kevin MacLeod', 'Kevin MacLeod Tribute Orchestra')).toBe(false);
+    expect(isSameArtistName('Kevin MacLeod', 'Kevin MacLeod Orchestra')).toBe(false);
+    expect(isSameArtistName('Patrick Patrikios', 'Patrick Jordan Lee Patrikios')).toBe(false);
+    expect(isSameArtistName('Patrick Patrikios', 'Patrikios Jordan Patrick')).toBe(false);
+  });
+
   it('một từ chung không đủ để coi là cùng người', () => {
     expect(isSameArtistName('Patrick', 'Patrick Jordan Patrikios')).toBe(false);
     expect(isSameArtistName('Ca Si A', 'Ca Si B')).toBe(false);
@@ -96,6 +113,10 @@ describe('getArtistCandidates', () => {
   it('giữ chuỗi đầy đủ và tách từng tên', () => {
     expect(getArtistCandidates('A, B & C ft. D')).toEqual(['A, B & C ft. D', 'A', 'B', 'C', 'D']);
     expect(getArtistCandidates('A / B and C')).toEqual(['A / B and C', 'A', 'B', 'C']);
+  });
+
+  it('danh sách thư viện chỉ tách theo dấu phẩy và gạch chéo', () => {
+    expect(getArtistCandidates('The Grey Room / Density & Time', true)).toEqual(['The Grey Room / Density & Time', 'The Grey Room', 'Density & Time']);
   });
 
   it('bỏ tên rỗng', () => {

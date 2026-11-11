@@ -5,6 +5,7 @@ Chỉ nhận link chuẩn của một video. Việc tải từ YouTube có thể
 
 import importlib.util
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -42,6 +43,40 @@ class ExtractedAudio:
 
 def find_ffmpeg():
     return os.environ.get("FFMPEG_LOCATION") or shutil.which("ffmpeg") or ""
+
+
+DURATION_PATTERN = re.compile(r"Duration:\s*(\d+):(\d{2}):(\d{2}(?:\.\d+)?)")
+DURATION_TIMEOUT_SECONDS = 60
+
+
+def parse_ffmpeg_duration(output):
+    """Đọc dòng "Duration: 00:03:12.34" mà ffmpeg in khi mở file. Không đọc được thì trả về 0."""
+    match = DURATION_PATTERN.search(output or "")
+    if not match:
+        return 0.0
+    hours, minutes, seconds = match.groups()
+    return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+
+
+def media_duration(path):
+    """Độ dài file âm thanh hoặc video theo ffmpeg, để tính đúng số yêu cầu AudD. Thiếu ffmpeg hay lỗi thì trả về 0 (tính theo trần)."""
+    ffmpeg = find_ffmpeg()
+    if ffmpeg and Path(ffmpeg).is_dir():
+        ffmpeg = str(Path(ffmpeg) / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg"))
+    if not ffmpeg:
+        return 0.0
+    try:
+        done = subprocess.run(
+            [ffmpeg, "-hide_banner", "-i", str(path)],
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=DURATION_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return 0.0
+    return parse_ffmpeg_duration(done.stderr)
 
 
 def build_command(url, folder, max_seconds, ffmpeg):

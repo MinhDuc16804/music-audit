@@ -37,6 +37,14 @@ describe('createStateFile', () => {
     expect(state.readSync()).toEqual([4, 5]);
   });
 
+  it('readSyncStrict: chưa có file là null, file hỏng thì báo lỗi', async () => {
+    const path = join(folder, 'hong.json');
+    const state = createStateFile<number[]>(() => path, 'thử');
+    expect(state.readSyncStrict()).toBeNull();
+    await writeFile(path, '{hỏng', 'utf8');
+    expect(() => state.readSyncStrict()).toThrow();
+  });
+
   it('các lần ghi đi lần lượt, lần sau cùng thắng', async () => {
     const state = createStateFile<string>(() => join(folder, 'state.json'), 'thử');
     void state.write('a');

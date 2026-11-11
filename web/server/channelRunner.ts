@@ -118,6 +118,12 @@ export function createChannelRunner(deps: ChannelRunnerDeps) {
   const stateFile = createStateFile<ChannelScan[]>(deps.getFilePath, 'trạng thái quét kênh');
   let stopStep: (() => void) | null = null;
   let isListing = false;
+  /** Lần quét đang có vòng gửi chạy. Chạy tiếp khi vòng cũ chưa thoát thì dùng tiếp vòng đó, không mở vòng thứ hai. */
+  const sendingLoops = new Set<string>();
+  /** Lần quét đã bấm Dừng khi một video đang gửi: chờ video đó xong rồi mới kết thúc. */
+  const stopRequested = new Set<string>();
+  /** Lệnh gửi đang chạy hoặc đang chờ trong hàng đợi chung. */
+  let sending: { scanId: string; videoId: string } | null = null;
 
   const persist = () => stateFile.write(scans);
 
@@ -231,12 +237,43 @@ export function createChannelRunner(deps: ChannelRunnerDeps) {
     }
   };
 
+  /** Video đã gửi xong (hoặc có thể đã gửi): bỏ khỏi danh sách chờ. Chỉ bỏ nếu nó vẫn đứng đầu, để không bỏ nhầm video khác. */
+  const markSent = async (scan: ChannelScan, videoId: string, isFailed: boolean) => {
+    if (scan.pendingIds[0] !== videoId) {
+      return;
+    }
+    scan.pendingIds.shift();
+    scan.failed += isFailed ? 1 : 0;
+    scan.progress = { ...scan.progress, done: scan.progress.done + 1 };
+    await persist();
+  };
+
+  const isSending = (scan: ChannelScan) => scan.status === 'identifying' && !stopRequested.has(scan.id);
+
   const identify = async (scan: ChannelScan) => {
+    if (sendingLoops.has(scan.id)) {
+      return;
+    }
+    sendingLoops.add(scan.id);
+    try {
+      await sendLoop(scan);
+    } finally {
+      sendingLoops.delete(scan.id);
+    }
+    if (stopRequested.delete(scan.id)) {
+      await finish(scan, true);
+    } else if (scan.status === 'identifying' && scan.pendingIds.length === 0) {
+      await finish(scan, false);
+    }
+  };
+
+  const sendLoop = async (scan: ChannelScan) => {
     const options = scan.options as ChannelOptions;
     const workdir = deps.getWorkdir(scan.channelKey);
-    while (scan.status === 'identifying' && scan.pendingIds.length > 0) {
+    while (isSending(scan) && scan.pendingIds.length > 0) {
       const videoId = scan.pendingIds[0];
       let output: string;
+      sending = { scanId: scan.id, videoId };
       try {
         // Ghi liền với dấu = vì mã video có thể bắt đầu bằng "-", Python sẽ hiểu nhầm là một tùy chọn.
         output = await deps.runQueued(workdir, [
@@ -244,7 +281,9 @@ export function createChannelRunner(deps: ChannelRunnerDeps) {
           ...(options.clips ? ['--clips', String(options.clips)] : []),
         ]);
       } catch (error) {
-        if (scan.status !== 'identifying') {
+        if (!isSending(scan)) {
+          // Đã bấm Dừng hoặc Tạm dừng trong lúc gửi: không biết AudD đã nhận chưa, nên coi như đã gửi để không hoàn tiền sai.
+          await markSent(scan, videoId, true);
           return;
         }
         // Lỗi lần đầu thì dừng để người dùng xem. Chạy tiếp mà vẫn lỗi đúng video đó thì bỏ qua nó,
@@ -255,29 +294,21 @@ export function createChannelRunner(deps: ChannelRunnerDeps) {
           return;
         }
         delete scan.lastFailedId;
-        scan.failed += 1;
-        scan.pendingIds.shift();
-        scan.progress = { ...scan.progress, done: scan.progress.done + 1 };
-        await persist();
+        await markSent(scan, videoId, true);
         continue;
+      } finally {
+        sending = null;
       }
       delete scan.lastFailedId;
       // Lỗi tài khoản thì video này chưa được quét, giữ lại để lần chạy tiếp gửi đúng nó.
       if (output.includes(ACCOUNT_ERROR_TEXT)) {
-        if (scan.status === 'identifying') {
+        if (isSending(scan)) {
           await pause(scan, ACCOUNT_REASON);
         }
         return;
       }
-      if (output.includes(VIDEO_ERROR_PREFIX)) {
-        scan.failed += 1;
-      }
-      scan.pendingIds.shift();
-      scan.progress = { ...scan.progress, done: scan.progress.done + 1 };
-      await persist();
-    }
-    if (scan.status === 'identifying') {
-      await finish(scan, false);
+      // Ghi nhận cả khi vừa bấm Tạm dừng hay Dừng, vì video này đã gửi xong.
+      await markSent(scan, videoId, output.includes(VIDEO_ERROR_PREFIX));
     }
   };
 
@@ -390,6 +421,7 @@ export function createChannelRunner(deps: ChannelRunnerDeps) {
       delete scan.pausedFrom;
       delete scan.pauseReason;
       await persist();
+      // Vòng gửi cũ còn chờ video đang gửi thì nó tự chạy tiếp, identify không mở vòng thứ hai.
       void (scan.status === 'identifying' ? identify(scan) : prepare(scan));
     },
 
@@ -398,6 +430,13 @@ export function createChannelRunner(deps: ChannelRunnerDeps) {
       const scan = findOwn(user, scanId);
       if (scan.status === 'done' || scan.status === 'ready') {
         throw new ChannelError(409, 'Lần quét này không chạy.');
+      }
+      // Đang gửi một video: không hoàn tiền video đó và không xóa âm thanh khi lệnh còn chạy. Vòng gửi kết thúc lần quét khi video xong.
+      if (sending?.scanId === scan.id && sendingLoops.has(scan.id)) {
+        stopRequested.add(scan.id);
+        scan.pauseReason = 'Đang chờ video đang gửi xong rồi dừng. Video này vẫn được tính phí.';
+        await persist();
+        return;
       }
       if (RUNNING_STATUSES.has(scan.status)) {
         stopStep?.();

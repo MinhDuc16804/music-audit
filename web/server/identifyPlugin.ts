@@ -14,7 +14,6 @@ import { tmpdir } from 'node:os';
 import { extname, join, resolve } from 'node:path';
 import type { Plugin } from 'vite';
 import { MAX_UPLOAD_BYTES, UPLOAD_TOO_LARGE_MESSAGE } from '../src/uploadLimit.ts';
-import { DEFAULT_MAX_SCAN_SECONDS } from '../src/batchScan.ts';
 import type { BatchCurrentResponse, BatchEstimateResponse } from '../src/batchScan.ts';
 import type { HistoryResponse, HistoryResult } from '../src/history.ts';
 import type { QuotaResponse } from '../src/quota.ts';
@@ -29,15 +28,15 @@ import { createAccessGuard, parseAccessConfig } from './accessAuth.ts';
 import { createQuotaReader, QUOTA_ROUTE } from './quota.ts';
 import type { ScanJobStarted, ScanJobView } from '../src/scanJob.ts';
 import { createInFlight } from './inFlight.ts';
+import { getAuditRoot as getMusicAuditRoot, loadAuditEnv } from './loadEnv.ts';
 import { createScanJobs, JOB_ROUTE, parseJobId } from './scanJobs.ts';
 import { createUploadSlots, parseMaxUploads } from './uploadSlots.ts';
 import { appendUsage, getUserEmail } from './usageLimit.ts';
 import type { UsageEntry } from './usageLimit.ts';
 import type { BudgetHold } from './monthlyBudget.ts';
-import { requestsForSeconds } from '../src/budget.ts';
 import { CHANNEL_ENV, parseAuditOutput, runAudit, runAuddCommand, startAudit } from './auditProcess.ts';
-import { BudgetError, createBudgetGuard } from './budgetGuard.ts';
-import { isSameOriginJson, isSameOriginUpload, parseUploadName, readBody, saveUpload, sendJson } from './http.ts';
+import { BudgetError, createBudgetGuard, getMaxScanSeconds } from './budgetGuard.ts';
+import { createGuard, isSameOriginJson, isSameOriginUpload, parseAllowedHosts, parseUploadName, readBody, saveUpload, sendJson } from './http.ts';
 
 export const ROUTE = '/api/identify';
 export const FILE_ROUTE = '/api/identify-file';
@@ -55,6 +54,11 @@ export function parseLinkRequest(body: string): { videoId: string; rescan: boole
 
 
 export function createHandlers(getAuditRoot: () => string) {
+  // Chạy ngoài Docker thì Node tự đọc .env, để ngân sách, danh sách kênh và Access có hiệu lực như Python đang gửi AudD thật.
+  const loadedEnv = loadAuditEnv(join(getMusicAuditRoot(), '.env'));
+  if (loadedEnv.length > 0) {
+    console.log(`Đã nạp ${loadedEnv.length} biến từ .env.`);
+  }
   // Lệnh identify đọc rồi ghi lại out/submissions.json, chạy song song có thể làm mất dữ liệu và quét trùng.
   let queue: Promise<unknown> = Promise.resolve();
 
@@ -69,7 +73,7 @@ export function createHandlers(getAuditRoot: () => string) {
   const getOutFolder = () => join(process.env.MUSIC_AUDIT_WORKDIR ?? getAuditRoot(), 'out');
   // audit.py lưu kết quả AudD theo mã video, nên có file này nghĩa là quét lại không tốn thêm.
   const isCached = (videoId: string) => existsSync(join(getOutFolder(), 'audd', `${videoId}.json`));
-  const { budget, budgetView, reserveBudget, reserveVideo, withBudget } = createBudgetGuard({
+  const { budget, budgetView, reserveBudget, reserveUpload, reserveVideo, withBudget } = createBudgetGuard({
     getOutFolder,
     isCached,
     readDurations: (videoId) => runAudit(getAuditRoot(), ['durations', '--', videoId]) as Promise<{ max_seconds?: number; videos?: Record<string, number> }>,
@@ -235,7 +239,7 @@ export function createHandlers(getAuditRoot: () => string) {
       | { max_seconds?: number; videos?: Record<string, number> }
       | null;
     return {
-      maxSeconds: info?.max_seconds ?? DEFAULT_MAX_SCAN_SECONDS,
+      maxSeconds: info?.max_seconds ?? getMaxScanSeconds(),
       videos: videoIds.map((videoId) => ({ videoId, cached: isCached(videoId), seconds: info?.videos?.[videoId] ?? 0 })),
     };
   };
@@ -417,7 +421,7 @@ export function createHandlers(getAuditRoot: () => string) {
       return;
     }
     // Chưa biết độ dài file trước khi nhận, nên giữ chỗ theo trần mỗi lần quét. Quét xong trả lại phần thừa.
-    const reserved = await checkBudget(response, user, 'file', fileName, async () => reserveBudget(user, 'file', requestsForSeconds(0, DEFAULT_MAX_SCAN_SECONDS))).catch((error: unknown) => {
+    const reserved = await checkBudget(response, user, 'file', fileName, async () => reserveUpload(user)).catch((error: unknown) => {
       releaseSlot();
       throw error;
     });
@@ -453,16 +457,8 @@ export function createHandlers(getAuditRoot: () => string) {
 
   // Bật CF_ACCESS_TEAM_DOMAIN và CF_ACCESS_AUD thì mọi đường dẫn quét đều phải có token Cloudflare Access hợp lệ.
   const allowAccess = createAccessGuard(parseAccessConfig(process.env.CF_ACCESS_TEAM_DOMAIN, process.env.CF_ACCESS_AUD));
-  const guard =
-    (handler: (request: IncomingMessage, response: ServerResponse) => unknown) =>
-    async (request: IncomingMessage, response: ServerResponse) => {
-      if (!(await allowAccess(request))) {
-        request.resume();
-        sendJson(response, 401, { error: 'Chưa đăng nhập qua Cloudflare Access hoặc phiên đã hết hạn. Hãy tải lại trang.' });
-        return;
-      }
-      await handler(request, response);
-    };
+  const allowedHosts = parseAllowedHosts(process.env.APP_HOSTNAMES);
+  const guard = createGuard(allowedHosts, allowAccess);
 
   return {
     handleLink: guard(handleLink),

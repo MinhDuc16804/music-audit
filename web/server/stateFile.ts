@@ -42,6 +42,15 @@ export function createStateFile<T>(getPath: () => string, label: string) {
       }
     },
 
+    /** Như readSync nhưng file có mà hỏng hay không đọc được thì báo lỗi, để nơi gọi chặn thay vì coi như chưa có gì. */
+    readSyncStrict(): T | null {
+      const path = getPath();
+      if (!existsSync(path)) {
+        return null;
+      }
+      return JSON.parse(readFileSync(path, 'utf8')) as T;
+    },
+
     /** Chụp lại giá trị ngay lúc gọi rồi ghi sau các lần ghi trước. */
     write(value: T): Promise<unknown> {
       const snapshot = JSON.stringify(value);

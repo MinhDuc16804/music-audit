@@ -12,7 +12,7 @@ from pathlib import Path
 
 from music_audit.audd import CHUNK_SECONDS, parse_audd
 from music_audit.evaluate import ERROR, identify_summary, parse_scan
-from music_audit.extract import extract_audio
+from music_audit.extract import extract_audio, media_duration
 from music_audit.workspace import (
     DEFAULT_CONTAINER_NAME,
     DEFAULT_REGION,
@@ -163,7 +163,8 @@ def cmd_identify_file(args, paths):
     if raw is None:
         raw = audd_client().recognize_file(path, limit)
         write_json(cache, raw)
-    _print_audd_result(args.name or path.name, digest[:11], raw, limit, cache=cache, cached=cached)
+    # Độ dài thật để web app tính đúng số yêu cầu AudD và độ phủ, thay vì tính trần 60 phút cho mọi file.
+    _print_audd_result(args.name or path.name, digest[:11], raw, limit, duration=media_duration(path), cache=cache, cached=cached)
 
 
 def cmd_identify(args, paths):

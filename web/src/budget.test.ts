@@ -45,6 +45,11 @@ describe('requestsForSeconds', () => {
     expect(requestsForSeconds(0, 3600)).toBe(300);
   });
 
+  it('trần sai (0 hay âm) thì tính theo 60 phút, không ghi thiếu', () => {
+    expect(requestsForSeconds(600, 0)).toBe(50);
+    expect(requestsForSeconds(0, -12)).toBe(300);
+  });
+
   it('nội dung rất ngắn vẫn tốn ít nhất 1 yêu cầu', () => {
     expect(requestsForSeconds(0.5, 3600)).toBe(1);
   });
@@ -98,6 +103,11 @@ describe('budgetState', () => {
 
   it('hết yêu cầu là đã chạm trần', () => {
     expect(budgetState(view(20_000))).toBe('full');
+  });
+
+  it('sổ chi hỏng là đã chạm trần, không còn yêu cầu nào', () => {
+    expect(budgetState({ ...view(0), isBroken: true })).toBe('full');
+    expect(remainingBudgetRequests({ ...view(0), isBroken: true })).toBe(0);
   });
 
   it('ngân sách 0 vì cấu hình sai là đã chạm trần', () => {

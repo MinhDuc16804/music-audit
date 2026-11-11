@@ -91,7 +91,18 @@ def audd_client():
 
 
 def audd_max_chunks():
-    return int(os.environ.get("AUDD_MAX_CHUNKS") or DEFAULT_AUDD_MAX_CHUNKS)
+    """Trần số đoạn 12 giây gửi AudD mỗi video. Sai hoặc không dương thì dừng hẳn: 0 hay số âm làm ước tính chi phí
+    ra 0, cả kênh sẽ được gửi mà không trừ ngân sách, và AudD có thể hiểu 0 là không giới hạn."""
+    value = (os.environ.get("AUDD_MAX_CHUNKS") or "").strip()
+    if not value:
+        return DEFAULT_AUDD_MAX_CHUNKS
+    try:
+        limit = int(value)
+    except ValueError:
+        limit = 0
+    if limit <= 0:
+        sys.exit("AUDD_MAX_CHUNKS trong .env phải là số nguyên dương, ví dụ 300 (60 phút đầu). Hãy sửa rồi chạy lại.")
+    return limit
 
 
 def known_durations(paths):

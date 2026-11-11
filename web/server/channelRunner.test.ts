@@ -328,17 +328,42 @@ describe('createChannelRunner', () => {
     expect(deps.logUsage).not.toHaveBeenCalled();
   });
 
-  it('giữ hạn mức khi gửi, dừng giữa chừng thì hoàn lại phần chưa gửi', async () => {
+  it('dừng lúc đang gửi: chờ video đó xong, chỉ hoàn phần chưa gửi, xóa âm thanh sau cùng', async () => {
     let release: (value: string) => void = () => undefined;
     const runQueued = vi.fn(() => new Promise<string>((resolveRun) => (release = resolveRun)));
     const { deps, runner } = setup({ runQueued });
     const scan = await startedAtGate(runner);
     await runner.send(USER, scan.id);
     expect(deps.reserveRequests).toHaveBeenCalledWith(USER, 10, scan.id);
+    await vi.waitFor(() => expect(runQueued).toHaveBeenCalledTimes(1));
     await runner.stop(USER, scan.id);
+    expect(deps.releaseRequests).not.toHaveBeenCalled();
+    expect(deps.removeAudio).not.toHaveBeenCalled();
+    expect((await runner.current(USER)).scan?.pauseReason).toContain('vẫn được tính phí');
     release('Đã quét 1/1 video.');
-    await waitForStatus(runner, 'done');
-    expect(deps.releaseRequests).toHaveBeenCalledWith(USER, 10, scan.id);
+    const done = await waitForStatus(runner, 'done');
+    expect(done.stoppedEarly).toBe(true);
+    // Video a đã gửi nên vẫn tính, chỉ hoàn 5 yêu cầu của video b chưa gửi.
+    expect(deps.releaseRequests).toHaveBeenCalledWith(USER, 5, scan.id);
+    expect(runQueued).toHaveBeenCalledTimes(1);
+    expect(deps.removeAudio).toHaveBeenCalledTimes(1);
+  });
+
+  it('tạm dừng rồi chạy tiếp ngay lúc đang gửi: không mở vòng gửi thứ hai, mỗi video gửi đúng một lần', async () => {
+    const releases: ((value: string) => void)[] = [];
+    const runQueued = vi.fn((_workdir: string, _args: string[]) => new Promise<string>((resolveRun) => releases.push(resolveRun)));
+    const { runner } = setup({ runQueued });
+    const scan = await startedAtGate(runner);
+    await runner.send(USER, scan.id);
+    await vi.waitFor(() => expect(runQueued).toHaveBeenCalledTimes(1));
+    await runner.pause(USER, scan.id);
+    await runner.resume(USER, scan.id);
+    releases[0]('Đã quét 1/1 video.');
+    await vi.waitFor(() => expect(runQueued).toHaveBeenCalledTimes(2));
+    releases[1]('Đã quét 1/1 video.');
+    const done = await waitForStatus(runner, 'done');
+    expect(runQueued.mock.calls.map(([, args]) => args[2])).toEqual(['--video-id=a', '--video-id=b']);
+    expect(done.progress).toEqual({ done: 2, total: 2 });
   });
 
   it('dừng trước khi gửi thì không hoàn gì vì chưa giữ', async () => {

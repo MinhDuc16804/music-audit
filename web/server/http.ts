@@ -81,3 +81,64 @@ export function saveUpload(request: IncomingMessage, targetPath: string): Promis
     request.pipe(target);
   });
 }
+
+/** Tên máy luôn được nhận: chính máy đang chạy app. */
+const LOCAL_HOSTNAMES = ['localhost', '127.0.0.1', '::1'];
+
+/** Danh sách tên máy được phép: máy này cộng các tên miền trong APP_HOSTNAMES (cách nhau bằng dấu phẩy), như tên miền đi qua Cloudflare Tunnel. */
+export function parseAllowedHosts(value: string | undefined): Set<string> {
+  const extra = (value ?? '')
+    .split(',')
+    .map((name) => name.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/[/:].*$/, ''))
+    .filter(Boolean);
+  return new Set([...LOCAL_HOSTNAMES, ...extra]);
+}
+
+/** Tên máy trong header Host, bỏ cổng. "[::1]:8080" thành "::1". */
+export function getHostname(host: string | undefined): string {
+  const value = (host ?? '').trim().toLowerCase();
+  if (value.startsWith('[')) {
+    return value.slice(1, value.indexOf(']') > 0 ? value.indexOf(']') : undefined);
+  }
+  return value.replace(/:\d+$/, '');
+}
+
+/**
+ * Chống DNS rebinding: trang độc có thể trỏ tên miền của nó về 127.0.0.1 rồi gọi API, khi đó Origin và Host cùng là tên miền độc
+ * nên kiểm cùng nguồn không chặn được. Chỉ trả lời khi Host là tên máy được phép.
+ */
+export function isAllowedHost(host: string | undefined, allowed: Set<string>): boolean {
+  const name = getHostname(host);
+  return name !== '' && allowed.has(name);
+}
+
+type Handler = (request: IncomingMessage, response: ServerResponse) => unknown;
+
+/** Bọc mọi đường dẫn quét: kiểm tên máy, kiểm Cloudflare Access, và bắt mọi lỗi để server không sập. */
+export function createGuard(allowedHosts: Set<string>, allowAccess: (request: IncomingMessage) => Promise<boolean>) {
+  return (handler: Handler) =>
+    async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
+      if (!isAllowedHost(request.headers.host, allowedHosts)) {
+        request.resume();
+        sendJson(response, 403, { error: 'Tên miền này chưa được phép dùng app. Người quản trị cần thêm nó vào APP_HOSTNAMES trong .env.' });
+        return;
+      }
+      if (!(await allowAccess(request))) {
+        request.resume();
+        sendJson(response, 401, { error: 'Chưa đăng nhập qua Cloudflare Access hoặc phiên đã hết hạn. Hãy tải lại trang.' });
+        return;
+      }
+      try {
+        await handler(request, response);
+      } catch (error) {
+        // Lỗi bất ngờ, ví dụ đĩa đầy không tạo được thư mục tạm: trả lỗi cho yêu cầu này thay vì để Node thoát và mất mọi lượt đang quét.
+        console.error(`Lỗi khi xử lý ${request.method} ${request.url}: ${error instanceof Error ? error.message : String(error)}`);
+        if (!response.headersSent) {
+          sendJson(response, 500, { error: 'Máy chủ gặp lỗi khi xử lý yêu cầu. Hãy thử lại sau, nếu vẫn lỗi thì báo người quản trị.' });
+        } else {
+          response.end();
+        }
+      }
+    };
+}
+

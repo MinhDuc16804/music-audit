@@ -88,7 +88,9 @@ export function BudgetPanel({ view, now = new Date() }: { view: BudgetView; now?
       {state !== 'ok' && (
         <p className={`flex gap-2 rounded-xl px-3 py-2.5 text-sm ${state === 'full' ? 'bg-rose-50 text-rose-800' : 'bg-amber-50 text-amber-800'}`}>
           <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
-          {state === 'full'
+          {view.isBroken
+            ? `Sổ chi AudD tháng này (out/budget/${view.month}.json) không đọc được nên app tạm chặn mọi lượt quét. Nhờ người quản trị sửa hoặc khôi phục file.`
+            : state === 'full'
             ? `Ngân sách tháng đã hết. Lượt quét mới bị từ chối tới ${budgetResetDay(view)}, hoặc tới khi người quản trị tăng AUDD_MONTHLY_BUDGET.`
             : `Đã dùng ${usedPercent}% ngân sách tháng. Còn ${money(remainingMoney(view))}, ${audioLeftText(left)}. Quét cả kênh lớn có thể bị từ chối.`}
         </p>

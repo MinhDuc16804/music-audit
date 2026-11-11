@@ -85,6 +85,9 @@ export interface BatchRunnerDeps {
 
 const isActive = (item: BatchItem) => item.status === 'queued' || item.status === 'running';
 
+const RESTART_ERROR = 'App khởi động lại khi đang quét video này. AudD có thể đã tính phí, bấm Quét lại nếu vẫn cần kết quả.';
+const RESTART_PAUSE = 'App vừa khởi động lại giữa lúc quét. Bấm Chạy tiếp để quét các video còn lại.';
+
 function settle(batch: Batch) {
   if (!batch.items.some(isActive)) {
     batch.status = 'done';
@@ -106,10 +109,21 @@ export function createBatchRunner(deps: BatchRunnerDeps) {
       return;
     }
     batches = saved;
-    // App dừng giữa chừng thì video đang quét chưa có kết quả, xếp lại để quét tiếp.
-    for (const item of batches.flatMap((batch) => batch.items)) {
-      if (item.status === 'running') {
-        item.status = 'queued';
+    // App dừng giữa lúc quét một video thì AudD có thể đã tính phí mà kết quả chưa lưu. Không tự gửi lại:
+    // video đó thành lỗi để người dùng tự bấm Quét lại, và lô tạm dừng để không tự chạy khi chưa ai xem.
+    for (const batch of batches) {
+      const interrupted = batch.items.filter((item) => item.status === 'running');
+      if (interrupted.length === 0) {
+        continue;
+      }
+      for (const item of interrupted) {
+        item.status = 'error';
+        item.error = RESTART_ERROR;
+      }
+      settle(batch);
+      if (batch.status !== 'done') {
+        batch.status = 'paused';
+        batch.pauseReason = RESTART_PAUSE;
       }
     }
   };
