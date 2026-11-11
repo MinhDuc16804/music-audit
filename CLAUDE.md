@@ -50,3 +50,15 @@ Nạp chúng trong `music_audit/detect.py` khi chạy thật, không import ở 
 - `resources/audio_library.csv` chỉ xác nhận bài có trong Library; không thấy trong danh sách thì vẫn là `chua-tra`.
 - Không dùng cookie tài khoản kênh hay cách vượt kiểm tra bot của YouTube khi tải âm thanh.
 - Kết quả thật có thể khác tài liệu API vì công cụ chưa chạy với tài khoản thật. Sai định dạng thì sửa bộ đọc và thêm kiểm thử.
+
+## Định nghĩa xong
+
+Một việc chỉ tính là xong khi đủ các bước sau. Bước nào chưa làm được thì ghi rõ khi báo cáo, không nói là xong.
+
+1. Có kiểm thử cho phần mới hoặc lỗi vừa sửa, và cả hai bộ kiểm thử đều qua: `python -m unittest discover -s tests` và `npx vitest run` trong `web/`.
+2. `npm run build` trong `web/` chạy sạch, gồm cả kiểm kiểu TypeScript.
+3. Việc nhìn thấy trên giao diện thì đã mở app thử, cả ở khung 375 px. Đổi giao diện hay tính năng thì làm bản xem trước bằng dữ liệu mẫu và được duyệt trước khi sửa.
+4. Việc chạy trong Docker thì đã `docker compose up -d --build` và kiểm tra trong container.
+5. Đổi cách dùng, biến môi trường hay quy tắc thì cập nhật `README.md`, `web/README.md`, `.env.example` và file này.
+6. Không làm sai các quy tắc ở trên, nhất là: không cho qua video có nhạc chưa khớp, không gửi AudD hai lần, không lộ khóa hay `data/`, `out/`.
+7. Đã commit, mỗi việc một commit, nội dung commit nói việc gì đã đổi.

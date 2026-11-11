@@ -219,6 +219,15 @@ Bài đo chỉ cho biết kết quả trên những bài đội đã biết, kh�
 `data/` và `out/` không vào git: danh sách video và kết quả quét là dữ liệu nhạy cảm về pháp lý. Hãy hỏi luật sư trước khi gửi cho
 bên ngoài. `.env` chứa khóa và cũng không vào git.
 
+Khi cần gửi app cho người khác, gửi file zip tạo từ git, đừng nén hay chép cả thư mục làm việc vì thư mục đó có `.env` chứa khóa thật,
+cùng `data/`, `out/` và `models/`. Lệnh dưới chỉ lấy file đã commit, nên không bao giờ có các thư mục đó:
+
+```bash
+git archive --format=zip --prefix=music-audit/ -o music-audit.zip HEAD
+```
+
+Người nhận chép `.env.example` thành `.env` và tự điền khóa của họ.
+
 ## Kiểm thử
 
 ```bash

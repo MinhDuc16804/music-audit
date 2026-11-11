@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { isSameOriginJson, isSameOriginUpload, parseLinkRequest, parseUploadName } from '../server/identifyPlugin.ts';
+import { isSameOriginJson, isSameOriginUpload, parseUploadName } from '../server/http.ts';
+import { parseLinkRequest } from '../server/identifyPlugin.ts';
 import { buildAudioLibraryIndex } from './audioLibrary';
 import { getScanCoverage, getTrackRanges, getVideoVerdict, hasSteadyTimecodes, needsStudioLookup, parseTimecode } from './videoCheck';
 import type { IdentifyResult, VideoTrack } from './videoCheck';

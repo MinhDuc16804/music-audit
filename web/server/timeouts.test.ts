@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { PROCESS_TIMEOUT_MS } from './identifyPlugin.ts';
+import { PROCESS_TIMEOUT_MS } from './auditProcess.ts';
 
 const PACKAGE = join(import.meta.dirname, '..', '..', 'music_audit');
 
