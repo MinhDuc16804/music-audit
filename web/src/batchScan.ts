@@ -36,8 +36,6 @@ export interface Batch {
 
 export interface BatchCurrentResponse {
   batch: Batch | null;
-  remainingScans: number;
-  dailyLimit: number;
   /** Ngân sách AudD tháng này của cả app, null hoặc thiếu nếu chưa bật. */
   budget?: BudgetView | null;
 }

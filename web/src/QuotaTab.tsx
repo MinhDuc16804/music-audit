@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { LoaderCircle, RefreshCw, ShieldAlert } from 'lucide-react';
 import { BudgetPanel } from './BudgetPanel';
-import { costOfRequests, formatMoney, remainingBudgetRequests } from './budget';
+import { formatMoney, remainingMoney } from './budget';
 import { Figure, Panel } from './components';
 import { formatNumber as number } from './ui';
 import { audioLeftText, daysLeft, formatQuotaDate, isQuotaLow, percentUsed } from './quota';
@@ -137,17 +137,11 @@ export function QuotaTab() {
           <div className="divide-y divide-slate-200">
             {data.budget && (
               <LimitRow label="Ngân sách còn lại tháng này (chung cả app)">
-                {formatMoney(costOfRequests(remainingBudgetRequests(data.budget), data.budget.pricePer1000), data.budget.currency)} /{' '}
+                {formatMoney(remainingMoney(data.budget), data.budget.currency)} /{' '}
                 {formatMoney(data.budget.amount, data.budget.currency)}
               </LimitRow>
             )}
-            <LimitRow label="Lượt quét còn lại hôm nay của bạn">
-              {number(data.remainingScans)} / {number(data.dailyLimit)}
-            </LimitRow>
             <LimitRow label="Trần mỗi lần quét cả kênh">{number(data.maxChannelRequests)} yêu cầu</LimitRow>
-            <LimitRow label="Yêu cầu quét kênh còn lại hôm nay của bạn">
-              {number(data.remainingChannelRequests)} / {number(data.dailyChannelRequests)}
-            </LimitRow>
           </div>
         </Panel>
       )}

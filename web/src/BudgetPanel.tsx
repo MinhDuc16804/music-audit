@@ -5,10 +5,12 @@ import {
   budgetPercent,
   budgetResetDay,
   budgetState,
-  costOfRequests,
   formatBudgetRange,
   formatMoney,
+  includedLeft,
+  monthCost,
   remainingBudgetRequests,
+  remainingMoney,
   spentRequests,
 } from './budget';
 import type { BudgetState, BudgetView } from './budget';
@@ -28,8 +30,8 @@ const BAR_COLORS: Record<BudgetState, string> = {
   full: 'bg-rose-600',
 };
 
-/** Danh sách tên kèm số yêu cầu, tiền và thanh tỉ lệ nhỏ. */
-function ShareList({ title, rows, view }: { title: string; rows: { label: string; requests: number }[]; view: BudgetView }) {
+/** Danh sách tên kèm số yêu cầu, phần trăm và thanh tỉ lệ nhỏ. Không quy ra tiền vì phí gói là chung cả công ty. */
+function ShareList({ title, rows }: { title: string; rows: { label: string; requests: number }[] }) {
   const total = rows.reduce((sum, { requests }) => sum + requests, 0);
   return (
     <div className="min-w-0 space-y-1.5">
@@ -41,8 +43,8 @@ function ShareList({ title, rows, view }: { title: string; rows: { label: string
           {rows.map(({ label, requests }) => (
             <li key={label} className="grid grid-cols-[1fr_auto_auto] items-center gap-x-3 gap-y-1 py-1.5 text-sm">
               <span className="min-w-0 break-all text-slate-700">{label}</span>
-              <span className="text-xs text-slate-500 tabular-nums">{number(requests)} yc</span>
-              <b className="min-w-20 text-right font-semibold text-slate-900 tabular-nums">{formatMoney(costOfRequests(requests, view.pricePer1000), view.currency)}</b>
+              <span className="text-xs text-slate-500 tabular-nums">{total ? Math.round((requests / total) * 100) : 0}%</span>
+              <b className="min-w-16 text-right font-semibold text-slate-900 tabular-nums">{number(requests)} yc</b>
               <span className="col-span-3 h-1 overflow-hidden rounded-full bg-brand-50">
                 <span className="block h-full rounded-full bg-brand-600" style={{ width: `${total ? Math.round((requests / total) * 100) : 0}%` }} />
               </span>
@@ -58,9 +60,12 @@ function ShareList({ title, rows, view }: { title: string; rows: { label: string
 export function BudgetPanel({ view, now = new Date() }: { view: BudgetView; now?: Date }) {
   const state = budgetState(view);
   const pill = PILLS[state];
-  const money = (requests: number) => formatMoney(costOfRequests(requests, view.pricePer1000), view.currency);
+  const money = (amount: number) => formatMoney(amount, view.currency);
   const spent = spentRequests(view);
   const left = remainingBudgetRequests(view);
+  const spentMoney = monthCost(spent, view);
+  const heldMoney = monthCost(view.chargedRequests, view) - spentMoney;
+  const included = includedLeft(view);
   const spentPercent = budgetPercent(spent, view);
   const heldPercent = budgetPercent(view.heldRequests, view);
   const usedPercent = Math.floor(budgetPercent(view.chargedRequests, view));
@@ -71,7 +76,7 @@ export function BudgetPanel({ view, now = new Date() }: { view: BudgetView; now?
         <div className="min-w-0 flex-[1_1_16rem]">
           <p className="text-xs font-medium text-slate-500">Ngân sách AudD tháng {view.month.slice(5)}/{view.month.slice(0, 4)}</p>
           <p className="text-[22px] font-bold text-slate-900 tabular-nums">
-            {money(spent)} / {formatMoney(view.amount, view.currency)}
+            {money(spentMoney)} / {money(view.amount)}
           </p>
           <p className="text-sm text-slate-500 tabular-nums">
             Tính theo giờ Việt Nam, từ {formatBudgetRange(view)} · còn {budgetDaysLeft(view, now)} ngày
@@ -85,14 +90,18 @@ export function BudgetPanel({ view, now = new Date() }: { view: BudgetView; now?
           <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
           {state === 'full'
             ? `Ngân sách tháng đã hết. Lượt quét mới bị từ chối tới ${budgetResetDay(view)}, hoặc tới khi người quản trị tăng AUDD_MONTHLY_BUDGET.`
-            : `Đã dùng ${usedPercent}% ngân sách tháng. Còn ${money(left)}, ${audioLeftText(left)}. Quét cả kênh lớn có thể bị từ chối.`}
+            : `Đã dùng ${usedPercent}% ngân sách tháng. Còn ${money(remainingMoney(view))}, ${audioLeftText(left)}. Quét cả kênh lớn có thể bị từ chối.`}
         </p>
       )}
 
       <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
         <Figure label="Ngân sách tháng" value={number(view.amount)} hint={`${view.currency} · ${number(view.budgetRequests)} yêu cầu`} />
-        <Figure label="Đã chi" value={money(spent).replace(` ${view.currency}`, '')} hint={`${number(spent)} yêu cầu · ${Math.floor(spentPercent)}%`} />
-        <Figure label="Còn lại" value={money(left).replace(` ${view.currency}`, '')} hint={`${number(left)} yêu cầu · ${audioLeftText(left)}`} isMain />
+        <Figure
+          label="Đã chi"
+          value={money(spentMoney).replace(` ${view.currency}`, '')}
+          hint={`${number(spent)} yêu cầu · ${view.planRequests > 0 ? (included > 0 ? `còn ${number(included)} trong gói` : 'đã hết phần trong gói') : `${Math.floor(spentPercent)}%`}`}
+        />
+        <Figure label="Còn lại" value={money(remainingMoney(view)).replace(` ${view.currency}`, '')} hint={`${number(left)} yêu cầu · ${audioLeftText(left)}`} isMain />
       </div>
 
       <div className="grid gap-1.5">
@@ -108,19 +117,22 @@ export function BudgetPanel({ view, now = new Date() }: { view: BudgetView; now?
         </div>
         <p className="flex flex-wrap justify-between gap-x-3 text-xs text-slate-500 tabular-nums">
           <span>
-            Đã chi {Math.floor(spentPercent)}%{view.heldRequests > 0 && ` · đang giữ chỗ ${money(view.heldRequests)} cho lượt quét chưa xong`}
+            Đã dùng {Math.floor(spentPercent)}% số yêu cầu{view.heldRequests > 0 && ` · đang giữ chỗ ${number(view.heldRequests)} yêu cầu (${money(heldMoney)}) cho lượt quét chưa xong`}
           </span>
           <span>Vạch cam: cảnh báo ở {view.warnPercent}%</span>
         </p>
       </div>
 
       <div className="grid gap-5 sm:grid-cols-2">
-        <ShareList title="Theo người dùng" view={view} rows={view.byUser.map(({ user, requests }) => ({ label: user, requests }))} />
-        <ShareList title="Theo kiểu quét" view={view} rows={view.byKind.map(({ kind, requests }) => ({ label: BUDGET_KIND_LABELS[kind], requests }))} />
+        <ShareList title="Theo người dùng" rows={view.byUser.map(({ user, requests }) => ({ label: user, requests }))} />
+        <ShareList title="Theo kiểu quét" rows={view.byKind.map(({ kind, requests }) => ({ label: BUDGET_KIND_LABELS[kind], requests }))} />
       </div>
 
       <p className="text-xs text-slate-500">
-        Giá {formatMoney(view.pricePer1000, view.currency)} cho 1.000 yêu cầu, theo AUDD_PRICE_PER_1000. Kết quả đã lưu mở lại không tính tiền, Quét lại thì tính như lượt mới. Lượt quét lỗi giữ nguyên phần đã tính vì không biết AudD đã nhận bao nhiêu.
+        {view.planRequests > 0
+          ? `Gói ${money(view.planFee)} mỗi tháng gồm ${number(view.planRequests)} yêu cầu, vượt gói ${money(view.pricePer1000)} cho 1.000 yêu cầu. Phí gói tính cả khi chưa quét. `
+          : `Giá ${money(view.pricePer1000)} cho 1.000 yêu cầu. `}
+        Kết quả đã lưu mở lại không tính tiền, Quét lại thì tính như lượt mới. Lượt quét lỗi giữ nguyên phần đã tính vì không biết AudD đã nhận bao nhiêu.
       </p>
     </Panel>
   );

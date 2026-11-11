@@ -93,8 +93,6 @@ export type ChannelScanView = Omit<ChannelScan, 'videos' | 'pendingIds'> & { vid
 export interface ChannelCurrentResponse {
   scan: ChannelScanView | null;
   maxRequests: number;
-  /** Số yêu cầu AudD người này còn dùng được cho quét cả kênh hôm nay. */
-  remainingRequests: number;
   /** Ngân sách AudD tháng này của cả app, null hoặc thiếu nếu chưa bật. */
   budget?: BudgetView | null;
 }

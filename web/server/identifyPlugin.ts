@@ -3,8 +3,8 @@
  * lệnh identify của music-audit, lệnh này tự đọc token trong .env.
  *
  * Cấu hình qua biến môi trường: MUSIC_AUDIT_PYTHON (đường dẫn Python), MUSIC_AUDIT_WORKDIR (nơi lưu out/),
- * MAX_SCANS_PER_USER_PER_DAY (số lượt quét mỗi người mỗi ngày), MAX_CHANNEL_SCAN_REQUESTS (trần yêu cầu AudD mỗi lần quét cả kênh),
- * AUDD_MONTHLY_BUDGET và AUDD_PRICE_PER_1000 (trần chi phí AudD mỗi tháng cho cả app, xem monthlyBudget.ts).
+ * MAX_CHANNEL_SCAN_REQUESTS (trần yêu cầu AudD mỗi lần quét cả kênh),
+ * AUDD_MONTHLY_BUDGET và các biến gói AudD (trần chi phí mỗi tháng cho cả app, xem monthlyBudget.ts). App không giới hạn theo ngày.
  */
 
 import { spawn } from 'node:child_process';
@@ -30,8 +30,8 @@ import { createAccessGuard, parseAccessConfig } from './accessAuth.ts';
 import { AuddCommandError, createQuotaReader, QUOTA_ROUTE } from './quota.ts';
 import type { ScanJobStarted, ScanJobView } from '../src/scanJob.ts';
 import { createScanJobs, JOB_ROUTE, parseJobId } from './scanJobs.ts';
-import { appendUsage, createDailyLimiter, getLimitDay, getUserEmail, parseDailyLimit } from './usageLimit.ts';
-import type { DailyCounts, UsageEntry } from './usageLimit.ts';
+import { appendUsage, getUserEmail } from './usageLimit.ts';
+import type { UsageEntry } from './usageLimit.ts';
 import { createMonthlyBudget, parseBudgetConfig } from './monthlyBudget.ts';
 import type { BudgetHold, BudgetLedger } from './monthlyBudget.ts';
 import { createStateFile } from './stateFile.ts';
@@ -234,9 +234,6 @@ export function createHandlers(getAuditRoot: () => string) {
   const enqueue = (commandArgs: string[]) => enqueueJob(() => runAudit(getAuditRoot(), commandArgs));
 
   const getOutFolder = () => join(process.env.MUSIC_AUDIT_WORKDIR ?? getAuditRoot(), 'out');
-  // Bộ đếm theo ngày lưu ra out/limits/, nên khởi động lại app trong ngày không xóa số đã dùng.
-  const dailyStore = (name: string) => createStateFile<DailyCounts>(() => join(getOutFolder(), 'limits', `${name}.json`), `bộ đếm ${name}`);
-  const allowScan = createDailyLimiter(parseDailyLimit(process.env.MAX_SCANS_PER_USER_PER_DAY), getLimitDay, dailyStore('scans'));
 
   // Sổ chi AudD mỗi tháng một file trong out/budget/.
   const ledgerFiles = new Map<string, ReturnType<typeof createStateFile<BudgetLedger>>>();
@@ -330,14 +327,10 @@ export function createHandlers(getAuditRoot: () => string) {
       const hold = reserveBudget(user, 'batch', await estimateVideoRequests(parseYoutubeVideoId(url), false));
       return withBudget(hold, () => enqueue(['identify', url, '--extract']) as Promise<IdentifyResult>);
     },
-    reserve: allowScan,
-    release: allowScan.release,
     logResult: (user, target, outcome) => logUsage(user, 'batch', target, outcome),
   });
 
   const maxChannelRequests = parseMaxRequests(process.env.MAX_CHANNEL_SCAN_REQUESTS);
-  // Quét cả kênh không dùng lượt quét thường mà có hạn mức yêu cầu AudD riêng cho mỗi người mỗi ngày.
-  const channelBudget = createDailyLimiter(parseMaxRequests(process.env.MAX_CHANNEL_REQUESTS_PER_USER_PER_DAY), getLimitDay, dailyStore('channel-requests'));
   const channelHolds = new Map<string, BudgetHold>();
   const quotaReader = createQuotaReader({ run: runAuddCommand });
 
@@ -348,14 +341,9 @@ export function createHandlers(getAuditRoot: () => string) {
     }
     const { originalUrl } = request as IncomingMessage & { originalUrl?: string };
     const { searchParams } = new URL(originalUrl ?? request.url ?? '/', 'http://localhost');
-    const user = getUserEmail(request.headers);
     sendJson(response, 200, {
       ...(await quotaReader.read(searchParams.has('refresh'))),
-      remainingScans: allowScan.remaining(user),
-      dailyLimit: allowScan.maxPerDay,
       maxChannelRequests,
-      remainingChannelRequests: channelBudget.remaining(user),
-      dailyChannelRequests: channelBudget.maxPerDay,
       budget: budgetView(),
     } satisfies QuotaResponse);
   };
@@ -381,9 +369,6 @@ export function createHandlers(getAuditRoot: () => string) {
     logUsage: (user, target, outcome, scanId) => logUsage(user, 'channel', target, outcome, scanId),
     maxRequests: maxChannelRequests,
     reserveRequests: (user, count, scanId) => {
-      if (!channelBudget(user, count)) {
-        return `Lần quét cần ${count} yêu cầu AudD, nhưng hạn mức quét kênh hôm nay của bạn chỉ còn ${channelBudget.remaining(user)}. Hãy quét ít video hơn hoặc thử lại vào ngày mai.`;
-      }
       try {
         const hold = reserveBudget(user, 'channel', count);
         if (hold) {
@@ -391,17 +376,14 @@ export function createHandlers(getAuditRoot: () => string) {
         }
         return null;
       } catch (error) {
-        channelBudget.release(user, count);
         return error instanceof Error ? error.message : 'Không đủ ngân sách.';
       }
     },
-    releaseRequests: (user, count, scanId) => {
-      channelBudget.release(user, count);
+    releaseRequests: (_user, count, scanId) => {
       const hold = channelHolds.get(scanId) ?? null;
       channelHolds.delete(scanId);
       budget?.settle(hold, (hold?.requests ?? 0) - count);
     },
-    remainingRequests: channelBudget.remaining,
   });
 
   const handleChannel = async (request: IncomingMessage, response: ServerResponse) => {
@@ -469,8 +451,6 @@ export function createHandlers(getAuditRoot: () => string) {
 
   const getBatchState = async (user: string): Promise<BatchCurrentResponse> => ({
     batch: await batchRunner.current(user),
-    remainingScans: allowScan.remaining(user),
-    dailyLimit: allowScan.maxPerDay,
     budget: budgetView(),
   });
 
@@ -521,19 +501,9 @@ export function createHandlers(getAuditRoot: () => string) {
     }
   };
 
-  /** Hết lượt thì báo lỗi và trả về false. */
-  const checkLimit = async (response: ServerResponse, user: string, kind: UsageEntry['kind'], target: string) => {
-    if (allowScan(user)) {
-      return true;
-    }
-    await logUsage(user, kind, target, 'limited');
-    sendJson(response, 429, { error: 'Đã hết lượt quét hôm nay. Hãy thử lại vào ngày mai hoặc liên hệ người quản trị.' });
-    return false;
-  };
-
   const scanJobs = createScanJobs();
 
-  /** Giữ chỗ ngân sách cho lượt quét lẻ. Không đủ thì hoàn lượt ngày, báo lỗi 429 và trả về false. */
+  /** Giữ chỗ ngân sách cho lượt quét lẻ. Không đủ thì báo lỗi 429 và trả về false. */
   const checkBudget = async (response: ServerResponse, user: string, kind: 'link' | 'file', target: string, estimate: () => Promise<number>) => {
     try {
       return { hold: reserveBudget(user, kind, await estimate()) };
@@ -541,14 +511,13 @@ export function createHandlers(getAuditRoot: () => string) {
       if (!(error instanceof BudgetError)) {
         throw error;
       }
-      allowScan.release(user, 1);
       await logUsage(user, kind, target, 'limited');
       sendJson(response, 429, { error: error.message });
       return false;
     }
   };
 
-  /** Quét một nội dung ở nền rồi ghi nhật ký. Quét lỗi thì không có kết quả, nên hoàn lại lượt đã tính. */
+  /** Quét một nội dung ở nền rồi ghi nhật ký. */
   const runScan = async (
     user: string,
     kind: 'link' | 'file',
@@ -562,7 +531,6 @@ export function createHandlers(getAuditRoot: () => string) {
       await logUsage(user, kind, target, 'done', kind === 'file' ? result.video_id : undefined, rescan);
       return result;
     } catch (error) {
-      allowScan.release(user, 1);
       await logUsage(user, kind, target, 'error', undefined, rescan);
       throw error;
     }
@@ -587,9 +555,6 @@ export function createHandlers(getAuditRoot: () => string) {
         return;
       }
       target = getVideoUrl(videoId);
-      if (!(await checkLimit(response, user, 'link', target))) {
-        return;
-      }
       const reserved = await checkBudget(response, user, 'link', target, () => estimateVideoRequests(videoId, rescan));
       if (!reserved) {
         return;
@@ -642,10 +607,6 @@ export function createHandlers(getAuditRoot: () => string) {
     }
 
     const user = getUserEmail(request.headers);
-    if (!(await checkLimit(response, user, 'file', fileName))) {
-      request.resume();
-      return;
-    }
     // Chưa biết độ dài file trước khi nhận, nên giữ chỗ theo trần mỗi lần quét. Quét xong trả lại phần thừa.
     const reserved = await checkBudget(response, user, 'file', fileName, async () => requestsForSeconds(0, DEFAULT_MAX_SCAN_SECONDS));
     if (!reserved) {
@@ -659,8 +620,7 @@ export function createHandlers(getAuditRoot: () => string) {
     try {
       await saveUpload(request, uploadPath);
     } catch (error) {
-      // File chưa tới nơi thì chưa gửi gì cho AudD, nên hoàn lượt và ngân sách.
-      allowScan.release(user, 1);
+      // File chưa tới nơi thì chưa gửi gì cho AudD, nên hoàn ngân sách.
       budget?.settle(reserved.hold, 0);
       await removeFolder();
       await logUsage(user, 'file', fileName, 'error');

@@ -100,11 +100,10 @@ export interface ChannelRunnerDeps {
   /** scanId được ghi kèm để tab Lịch sử quét mở lại đúng báo cáo. */
   logUsage: (user: string, target: string, outcome: 'done' | 'error', scanId: string) => Promise<void>;
   maxRequests: number;
-  /** Giữ chỗ từng ấy yêu cầu AudD (hạn mức ngày của người này và ngân sách tháng). Không đủ thì trả về câu báo lý do. */
+  /** Giữ chỗ từng ấy yêu cầu AudD trong ngân sách tháng. Không đủ thì trả về câu báo lý do. */
   reserveRequests: (user: string, count: number, scanId: string) => string | null;
   /** Gọi một lần khi lần quét đã gửi kết thúc, count là phần chưa gửi được hoàn lại, 0 nếu quét hết. */
   releaseRequests: (user: string, count: number, scanId: string) => void;
-  remainingRequests: (user: string) => number;
 }
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : 'Không chạy được bước này.');
@@ -286,7 +285,7 @@ export function createChannelRunner(deps: ChannelRunnerDeps) {
     async current(user: string, ): Promise<ChannelCurrentResponse> {
       await ready();
       const scan = scans.filter((candidate) => candidate.user === user).at(-1);
-      return { scan: scan ? toView(scan) : null, maxRequests: deps.maxRequests, remainingRequests: deps.remainingRequests(user) };
+      return { scan: scan ? toView(scan) : null, maxRequests: deps.maxRequests };
     },
 
     async create(user: string, channel: { url: string; key: string }, skipShorts: boolean): Promise<void> {

@@ -2,8 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { appendUsage, createDailyLimiter, getLimitDay, getUserEmail, parseDailyLimit } from './usageLimit.ts';
-import type { DailyCounts } from './usageLimit.ts';
+import { appendUsage, getUserEmail } from './usageLimit.ts';
 
 describe('getUserEmail', () => {
   it('đọc email từ Cloudflare Access và chuẩn hóa', () => {
@@ -12,99 +11,6 @@ describe('getUserEmail', () => {
 
   it('không có header thì là người không rõ', () => {
     expect(getUserEmail({})).toBe('khong-ro');
-  });
-});
-
-describe('parseDailyLimit', () => {
-  it('nhận số nguyên không âm', () => {
-    expect(parseDailyLimit('5')).toBe(5);
-    expect(parseDailyLimit('0')).toBe(0);
-  });
-
-  it('giá trị trống hoặc sai thì dùng mặc định', () => {
-    for (const value of [undefined, '', ' ', 'abc', '-1', '1.5']) {
-      expect(parseDailyLimit(value)).toBe(30);
-    }
-  });
-});
-
-describe('getLimitDay', () => {
-  it('đổi ngày lúc nửa đêm giờ Việt Nam', () => {
-    expect(getLimitDay(new Date('2026-11-07T16:59:59Z'))).toBe('2026-11-07');
-    expect(getLimitDay(new Date('2026-11-07T17:00:00Z'))).toBe('2026-11-08');
-  });
-});
-
-describe('createDailyLimiter lưu ra file', () => {
-  const memoryStore = (saved: DailyCounts | null) => {
-    const store = { saved, readSync: () => store.saved, write: (value: DailyCounts) => void (store.saved = value) };
-    return store;
-  };
-
-  it('khởi động lại trong ngày vẫn giữ số đã dùng', () => {
-    const store = memoryStore(null);
-    const first = createDailyLimiter(3, () => '2026-11-10', store);
-    first('a', 2);
-    const restarted = createDailyLimiter(3, () => '2026-11-10', store);
-    expect(restarted.remaining('a')).toBe(1);
-    expect([restarted('a'), restarted('a')]).toEqual([true, false]);
-  });
-
-  it('số đã lưu của ngày khác thì bỏ', () => {
-    const allow = createDailyLimiter(3, () => '2026-11-10', memoryStore({ day: '2026-11-09', counts: { a: 3 } }));
-    expect(allow.remaining('a')).toBe(3);
-  });
-
-  it('hoàn lượt cũng được lưu', () => {
-    const store = memoryStore(null);
-    const allow = createDailyLimiter(5, () => '2026-11-10', store);
-    allow('a', 4);
-    allow.release('a', 3);
-    expect(store.saved).toEqual({ day: '2026-11-10', counts: { a: 1 } });
-  });
-});
-
-describe('createDailyLimiter', () => {
-  it('đếm riêng từng người', () => {
-    const allow = createDailyLimiter(2, () => '2026-11-07');
-    expect([allow('a'), allow('a'), allow('a')]).toEqual([true, true, false]);
-    expect(allow('b')).toBe(true);
-  });
-
-  it('sang ngày mới thì đếm lại', () => {
-    let today = '2026-11-07';
-    const allow = createDailyLimiter(1, () => today);
-    expect([allow('a'), allow('a')]).toEqual([true, false]);
-    today = '2026-11-08';
-    expect(allow('a')).toBe(true);
-  });
-
-  it('giới hạn 0 là chặn hết', () => {
-    expect(createDailyLimiter(0, () => '2026-11-07')('a')).toBe(false);
-  });
-
-  it('giữ nhiều lượt một lần, không đủ thì không tính lượt nào', () => {
-    const take = createDailyLimiter(5, () => '2026-11-07');
-    expect(take('a', 4)).toBe(true);
-    expect(take('a', 2)).toBe(false);
-    expect(take.remaining('a')).toBe(1);
-  });
-
-  it('hoàn lại lượt không dùng đến', () => {
-    const take = createDailyLimiter(5, () => '2026-11-07');
-    take('a', 4);
-    take.release('a', 3);
-    expect(take.remaining('a')).toBe(4);
-    take.release('a', 10);
-    expect(take.remaining('a')).toBe(5);
-  });
-
-  it('sang ngày mới thì số lượt còn lại đầy trở lại', () => {
-    let today = '2026-11-07';
-    const take = createDailyLimiter(5, () => today);
-    take('a', 5);
-    today = '2026-11-08';
-    expect(take.remaining('a')).toBe(5);
   });
 });
 

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { ListVideo, LoaderCircle, Search, ShieldAlert, Tv, Video } from 'lucide-react';
 import { formatDuration } from './batchScan';
-import { budgetRefusal, costOfRequests, formatMoney, remainingBudgetRequests } from './budget';
+import { budgetRefusal, extraCost, formatMoney, remainingBudgetRequests, remainingMoney } from './budget';
 import type { BudgetView } from './budget';
 import { ChannelResult, PastScans } from './ChannelReport';
 import { MAX_CLIPS, MIN_CLIPS, parseChannelInput, pickPrepared, searchChannelVideos, worstCaseRequests } from './channelScan';
@@ -189,7 +189,6 @@ function VideoList({ videos, options, maxSeconds }: { videos: ChannelVideo[]; op
 function RunPanel({
   scan,
   maxRequests,
-  remainingRequests,
   budget,
   isBusy,
   onAction,
@@ -197,7 +196,6 @@ function RunPanel({
 }: {
   scan: ChannelScanView;
   maxRequests: number;
-  remainingRequests: number;
   /** Ngân sách AudD tháng này, null nếu chưa bật. */
   budget: BudgetView | null;
   /** Đang chờ máy chủ trả lời lần bấm trước, khóa các nút để không gửi hai lần. */
@@ -218,8 +216,7 @@ function RunPanel({
   const canStop = isRunning || scan.status === 'paused';
   const gate = scan.gate;
   const isOverLimit = Boolean(gate && gate.requests > maxRequests);
-  const isOverDaily = Boolean(gate && !isOverLimit && gate.requests > remainingRequests);
-  const isOverBudget = Boolean(gate && budget && !isOverLimit && !isOverDaily && gate.requests > remainingBudgetRequests(budget));
+  const isOverBudget = Boolean(gate && budget && !isOverLimit && gate.requests > remainingBudgetRequests(budget));
   const subtitle =
     scan.status === 'done'
       ? scan.stoppedEarly
@@ -286,28 +283,23 @@ function RunPanel({
           </p>
           {budget && gate.requests > 0 && (
             <p>
-              Chi phí tối đa <b className="tabular-nums">{formatMoney(costOfRequests(gate.requests, budget.pricePer1000), budget.currency)}</b>. Ngân sách tháng còn{' '}
+              Chi phí thêm tối đa <b className="tabular-nums">{formatMoney(extraCost(gate.requests, budget), budget.currency)}</b>. Ngân sách tháng còn{' '}
               <b className="tabular-nums">
                 {isOverBudget
-                  ? formatMoney(costOfRequests(remainingBudgetRequests(budget), budget.pricePer1000), budget.currency)
-                  : `${formatMoney(costOfRequests(remainingBudgetRequests(budget) - gate.requests, budget.pricePer1000), budget.currency)} sau khi quét`}
+                  ? formatMoney(remainingMoney(budget), budget.currency)
+                  : `${formatMoney(remainingMoney(budget) - extraCost(gate.requests, budget), budget.currency)} sau khi quét`}
               </b>
               .
             </p>
           )}
           {isOverBudget && budget && gate && <p className="text-rose-700">{budgetRefusal(gate.requests, budget)}</p>}
-          {isOverDaily && (
-            <p className="text-rose-700">
-              Hạn mức quét kênh hôm nay của bạn chỉ còn {number(remainingRequests)} yêu cầu. Hãy dừng ở đây và quét ít video hơn, hoặc thử lại vào ngày mai.
-            </p>
-          )}
           {isOverLimit && (
             <p className="text-rose-700">
               Vượt trần {number(maxRequests)} yêu cầu mỗi lần quét. Hãy dừng ở đây và quét ít video hơn, hoặc nhờ người quản trị tăng MAX_CHANNEL_SCAN_REQUESTS.
             </p>
           )}
           <div className="flex flex-wrap gap-2">
-            <button type="button" disabled={isOverLimit || isOverDaily || isOverBudget || isBusy} onClick={() => onAction(`/${scan.id}/send`)} className={PRIMARY_BUTTON}>
+            <button type="button" disabled={isOverLimit || isOverBudget || isBusy} onClick={() => onAction(`/${scan.id}/send`)} className={PRIMARY_BUTTON}>
               {gate.videos === 0 ? 'Xem báo cáo' : 'Gửi nhận diện'}
             </button>
             <button type="button" disabled={isBusy} onClick={() => onAction(`/${scan.id}/stop`)} className={SMALL_BUTTON}>
@@ -520,7 +512,7 @@ export function ChannelTab() {
               <StatRow label="Video chưa quét trong phạm vi" value={number(fresh.length)} />
               <StatRow label="Yêu cầu AudD ước tính" value={`${needsFilterResult ? 'tối đa ' : ''}${number(worst)}`} />
               <StatRow label="Trần mỗi lần quét" value={number(state?.maxRequests ?? 0)} />
-              <StatRow label="Hạn mức còn lại hôm nay" value={number(state?.remainingRequests ?? 0)} />
+              {state?.budget && <StatRow label="Ngân sách tháng còn" value={`${number(remainingBudgetRequests(state.budget))} yêu cầu`} />}
               <StatRow label="Hỏi lại trước khi gửi" value={needsFilterResult ? 'Có, với số chính xác' : 'Có'} />
             </div>
             {longVideos > 0 && options.clips === 0 && <p className="text-xs text-amber-800">{number(longVideos)} video dài hơn giới hạn, chỉ quét {Math.round((scan?.maxSeconds ?? 0) / 60)} phút đầu.</p>}
@@ -548,7 +540,6 @@ export function ChannelTab() {
           <RunPanel
             scan={scan}
             maxRequests={state?.maxRequests ?? 0}
-            remainingRequests={state?.remainingRequests ?? 0}
             budget={state?.budget ?? null}
             isBusy={isBusy}
             onAction={(path) => void run(() => post(path))}

@@ -62,8 +62,7 @@ export function RescanControl({
       {step === 'confirming' && (
         <div className="grid gap-2 rounded-xl bg-amber-50 px-3 py-2.5 text-sm text-amber-900 ring-1 ring-inset ring-amber-200" role="alert">
           <p>
-            <b className="font-semibold">Quét lại nội dung này?</b> App sẽ gửi lại âm thanh cho AudD: <b className="font-semibold tabular-nums">{requestText}</b> và{' '}
-            <b className="font-semibold">1 lượt quét</b> hôm nay của bạn. Kết quả cũ sẽ được thay bằng kết quả mới.
+            <b className="font-semibold">Quét lại nội dung này?</b> App sẽ gửi lại âm thanh cho AudD: <b className="font-semibold tabular-nums">{requestText}</b>, tính vào ngân sách tháng. Kết quả cũ sẽ được thay bằng kết quả mới.
           </p>
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={() => void handleConfirm()} className="rounded-xl bg-brand-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-900">

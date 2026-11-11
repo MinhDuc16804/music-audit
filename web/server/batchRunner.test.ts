@@ -33,8 +33,6 @@ function setup(overrides: Partial<BatchRunnerDeps> = {}) {
     getFilePath: () => filePath,
     isCached: vi.fn((_videoId: string) => false),
     scan: vi.fn(async (url: string) => resultFor(url)),
-    reserve: vi.fn((_user: string, _count: number) => true),
-    release: vi.fn(),
     logResult: vi.fn(async () => undefined),
     delayMs: 0,
     ...overrides,
@@ -93,18 +91,11 @@ describe('createBatchRunner', () => {
     expect(deps.logResult).toHaveBeenCalledTimes(2);
   });
 
-  it('không tính lượt video đã có kết quả', async () => {
-    const { deps, runner } = setup({ isCached: vi.fn((videoId: string) => videoId === A) });
-    await runner.create(USER, [A, B]);
-    expect(deps.reserve).toHaveBeenCalledWith(USER, 1);
+  it('gửi kèm người tạo lô cho bước quét, để tính ngân sách đúng người', async () => {
+    const { deps, runner } = setup();
+    await runner.create(USER, [A]);
     await waitFor(runner, ({ status }) => status === 'done');
-  });
-
-  it('không đủ lượt thì không tạo lô', async () => {
-    const { deps, runner } = setup({ reserve: vi.fn(() => false) });
-    await expect(runner.create(USER, [A])).rejects.toMatchObject({ status: 429 });
-    expect(deps.scan).not.toHaveBeenCalled();
-    expect(await runner.current(USER)).toBeNull();
+    expect(deps.scan).toHaveBeenCalledWith(`https://www.youtube.com/watch?v=${A}`, USER);
   });
 
   it('không cho tạo lô mới khi lô trước chưa xong', async () => {
@@ -162,7 +153,7 @@ describe('createBatchRunner', () => {
     expect(paused.pauseReason).toContain(BUDGET_REFUSAL_TEXT);
   });
 
-  it('quét lại video lỗi không tính thêm lượt', async () => {
+  it('quét lại được video bị lỗi', async () => {
     let shouldFail = true;
     const scan = vi.fn(async (url: string) => {
       if (shouldFail) {
@@ -177,7 +168,7 @@ describe('createBatchRunner', () => {
     await runner.retry(USER, id, A);
     const batch = await waitFor(runner, ({ items }) => items[0].status === 'done');
     expect(batch.items[0].error).toBeUndefined();
-    expect(deps.reserve).toHaveBeenCalledTimes(1);
+    expect(deps.scan).toHaveBeenCalledTimes(2);
   });
 
   it('chỉ quét lại được video bị lỗi', async () => {
@@ -187,7 +178,7 @@ describe('createBatchRunner', () => {
     await expect(runner.retry(USER, id, A)).rejects.toMatchObject({ status: 409 });
   });
 
-  it('hủy lô thì hoàn lượt các video còn chờ, trừ video đã có kết quả', async () => {
+  it('hủy lô thì các video còn chờ không được quét', async () => {
     let finish: (value: IdentifyResult) => void = () => undefined;
     const { deps, runner } = setup({
       isCached: vi.fn((videoId: string) => videoId === C),
@@ -196,7 +187,6 @@ describe('createBatchRunner', () => {
     const { id } = await runner.create(USER, [A, B, C]);
     await vi.waitFor(() => expect(deps.scan).toHaveBeenCalled());
     await runner.cancel(USER, id);
-    expect(deps.release).toHaveBeenCalledWith(USER, 1);
     finish(resultFor(A));
     const batch = await waitFor(runner, ({ status }) => status === 'done');
     expect(batch.items.map(({ status }) => status)).toEqual(['done', 'cancelled', 'cancelled']);

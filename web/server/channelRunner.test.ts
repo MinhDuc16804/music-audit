@@ -40,7 +40,6 @@ function setup(overrides: Partial<ChannelRunnerDeps> = {}) {
     maxRequests: 5000,
     reserveRequests: vi.fn((_user: string, _count: number, _scanId: string): string | null => null),
     releaseRequests: vi.fn((_user: string, _count: number, _scanId: string) => undefined),
-    remainingRequests: vi.fn((_user: string) => 5000),
   };
   const deps = { ...fakes, ...overrides } as typeof fakes;
   return { deps, runner: createChannelRunner(deps) };

@@ -70,10 +70,10 @@ nên app giới hạn file tải lên ở 95 MB. File lớn hơn thì xuất ri�
 
 Trên VPS, dữ liệu quét trong `out/` nằm ở nhà cung cấp ngoài công ty, và YouTube dễ chặn IP máy chủ hơn, nên quét bằng link có thể không chạy.
 
-Mỗi người có `MAX_SCANS_PER_USER_PER_DAY` lượt quét mỗi ngày, mặc định 30. Màn hình quét một video tính cả lượt lấy lại kết quả cũ, còn quét hàng loạt thì không. Quét lỗi thì được hoàn lượt. Bộ đếm về 0 lúc nửa đêm giờ Việt Nam và được lưu trong `out/limits/`, nên khởi động lại app không xóa số đã dùng.
+App không giới hạn theo ngày hay theo người. Giới hạn duy nhất là ngân sách AudD tháng của cả công ty, xem mục Ngân sách tháng, cùng trần mỗi video (`AUDD_MAX_CHUNKS`) và trần mỗi lần quét cả kênh.
 Màn hình quét một video chạy nền trên server rồi trình duyệt hỏi lại kết quả mỗi 3 giây, nên không bị Cloudflare cắt khi quét lâu. Bấm Dừng chờ thì server vẫn quét nốt, kết quả xem ở tab Lịch sử quét.
 
-Khi kết quả là kết quả cũ, màn hình Kiểm tra nhạc và tab Lịch sử quét ghi ngày quét và có nút **Quét lại**. Nút này luôn hỏi lại kèm số yêu cầu AudD sẽ tốn, tính 1 lượt quét và được ghi `"rescan": true` trong `out/usage.jsonl`. File tải lên chỉ quét lại được ở màn hình Kiểm tra nhạc, vì server không giữ file.
+Khi kết quả là kết quả cũ, màn hình Kiểm tra nhạc và tab Lịch sử quét ghi ngày quét và có nút **Quét lại**. Nút này luôn hỏi lại kèm số yêu cầu AudD sẽ tốn, tính vào ngân sách tháng và được ghi `"rescan": true` trong `out/usage.jsonl`. File tải lên chỉ quét lại được ở màn hình Kiểm tra nhạc, vì server không giữ file.
 Mỗi bài nhận ra có thanh vị trí và các mốc thời gian; với link YouTube, bấm mốc để mở video đúng giây đó.
 Công tắc "Báo cho tôi khi quét xong" ở tab Quét hàng loạt và Quét cả kênh hiện thông báo trình duyệt khi lô hoặc kênh xong, tạm dừng hoặc chờ xác nhận chi phí, và đổi tiêu đề tab. Chỉ báo được khi app còn mở ở một tab.
 Mỗi lượt được ghi vào `out/usage.jsonl` gồm thời gian, email, video hoặc tên file và kết quả. Email lấy từ header của Cloudflare Access,
@@ -98,7 +98,7 @@ Mục Quét hàng loạt nhận tối đa 20 link video mỗi lô, sửa ở `MA
 
 - Lô chạy nền trên server, đóng tab vẫn tiếp tục. Trạng thái lưu ở `out/batches.json`, app khởi động lại thì quét tiếp.
 - Mỗi người chỉ có một lô chưa xong tại một thời điểm. Server quét từng video một, xen kẽ với màn hình một video, nghỉ 5 giây giữa hai video phải tải về.
-- Lượt được giữ ngay khi tạo lô, mỗi video một lượt. Video đã có kết quả không tốn lượt. Hủy lô thì hoàn lượt phần chưa quét, quét lại video lỗi không tính thêm.
+- Mỗi video giữ chỗ ngân sách ngay trước khi gửi AudD. Video đã có kết quả không tốn gì. Hủy lô thì các video còn chờ không được gửi.
 - Số yêu cầu AudD ước tính lấy độ dài qua YouTube Data API. Thiếu `YOUTUBE_API_KEY` thì app hiện mức tối đa.
 - YouTube chặn tải thì lô tạm dừng và giữ các video chưa quét, bấm Chạy tiếp để thử lại.
 
@@ -107,8 +107,8 @@ Mục Quét hàng loạt nhận tối đa 20 link video mỗi lô, sửa ở `MA
 Mục Quét cả kênh nhận link kênh có @handle hoặc mã UC…, cần `YOUTUBE_API_KEY` để lấy danh sách video. Các bước: lấy danh sách, tải âm thanh, lọc nhạc nếu chọn, xác nhận chi phí, nhận diện, báo cáo.
 
 - App luôn dừng hỏi trước khi gửi AudD, kèm số video và số yêu cầu chính xác. Tải âm thanh và lọc nhạc không tốn lượt.
-- Mỗi lần quét không dùng `MAX_SCANS_PER_USER_PER_DAY` mà dùng trần `MAX_CHANNEL_SCAN_REQUESTS`, mặc định 5000 yêu cầu. Vượt trần thì không gửi được. Người bấm xác nhận và số yêu cầu được ghi vào `out/usage.jsonl`.
-- Mỗi người còn có hạn mức `MAX_CHANNEL_REQUESTS_PER_USER_PER_DAY` yêu cầu AudD cho quét kênh mỗi ngày, mặc định 5000. Số yêu cầu được giữ khi bấm Gửi nhận diện, dừng giữa chừng thì hoàn lại phần chưa gửi. Bộ đếm về 0 lúc nửa đêm.
+- Mỗi lần quét có trần `MAX_CHANNEL_SCAN_REQUESTS`, mặc định 5000 yêu cầu. Vượt trần thì không gửi được, hãy quét kênh lớn thành nhiều lần. Người bấm xác nhận và số yêu cầu được ghi vào `out/usage.jsonl`.
+- Số yêu cầu được giữ chỗ trong ngân sách tháng khi bấm Gửi nhận diện, dừng giữa chừng thì hoàn lại phần chưa gửi.
 - Một video làm lệnh gửi lỗi thì lần quét tạm dừng. Bấm Chạy tiếp mà vẫn lỗi đúng video đó thì app bỏ qua nó, video nằm ở nhóm Cần nghe lại.
 - Chọn gửi đoạn ngắn thì kết quả từng đoạn được lưu ngay ở `out/clips/`, nên lỗi giữa chừng rồi chạy lại không trả tiền lại các đoạn đã gửi. Mỗi video tối đa 30 đoạn.
 - Toàn máy chủ chỉ chạy một kênh một lúc, mỗi người chỉ có một lần quét dở. Đóng tab vẫn tiếp tục. App khởi động lại thì lần quét tạm dừng, phải bấm Chạy tiếp vì việc gửi AudD có tính phí.
@@ -132,7 +132,16 @@ Mở trang và nhập mã mà lệnh in ra, chỉ cần giữ quyền đọc tà
 
 ### Ngân sách tháng
 
-Điền `AUDD_MONTHLY_BUDGET` và `AUDD_PRICE_PER_1000` trong `.env` để đặt trần chi phí AudD mỗi tháng cho cả app, xem `.env.example`. Tháng tính theo lịch, giờ Việt Nam.
+Điền `AUDD_MONTHLY_BUDGET` và gói AudD đang dùng trong `.env` để đặt trần chi phí AudD mỗi tháng cho cả app, xem `.env.example`. Tháng tính theo lịch, giờ Việt Nam.
+
+Gói AudD gồm phí gói (`AUDD_PLAN_FEE`), số yêu cầu đã gồm trong phí gói (`AUDD_PLAN_REQUESTS`) và giá cho 1.000 yêu cầu vượt gói (`AUDD_PRICE_PER_1000`).
+Ví dụ gói 5 USD gồm 1.000 yêu cầu, vượt gói 5 USD cho 1.000: ngân sách 20 USD mua được 1.000 + 3.000 = 4.000 yêu cầu. Phí gói tính cả khi chưa quét, nên "Đã chi" luôn bắt đầu từ phí gói.
+
+| Gói | `AUDD_PLAN_FEE` | `AUDD_PLAN_REQUESTS` | `AUDD_PRICE_PER_1000` |
+|---|---|---|---|
+| 5 USD | 5 | 1000 | 5 |
+| 450 USD | 450 | 100000 | 4.5 |
+| 850 USD | 850 | 200000 | 4.25 |
 
 - Trước mỗi lần gửi AudD, server giữ chỗ số yêu cầu ước tính: video YouTube theo độ dài, file tải lên theo trần 60 phút, quét cả kênh theo số ở bước xác nhận. Không đủ thì từ chối và không gửi gì.
 - Quét xong thì tính theo số yêu cầu thật và trả lại phần thừa. Kết quả đã lưu không tính tiền. Lượt quét lỗi giữ nguyên phần đã tính, vì không biết AudD đã nhận bao nhiêu.

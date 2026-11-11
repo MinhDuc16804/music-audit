@@ -3,6 +3,7 @@ import type { FormEvent, ReactNode } from 'react';
 import { Ban, Clock, Download, Info, ListVideo, LoaderCircle, ShieldAlert, ShieldCheck, ShieldQuestion, ShieldX, Video } from 'lucide-react';
 import type { AudioLibraryIndex } from './audioLibrary';
 import { buildBatchCsv, estimateAuddRequests, formatDuration, MAX_BATCH_VIDEOS, parseBatchLinks } from './batchScan';
+import { budgetRefusal, extraCost, formatMoney, remainingBudgetRequests, remainingMoney } from './budget';
 import type { Batch, BatchCurrentResponse, BatchEstimateResponse, BatchItem } from './batchScan';
 import { IconBadge, Panel, SoundBars, TrackList } from './components';
 import { NotifySwitch, useScanNotice } from './NotifySwitch';
@@ -318,6 +319,7 @@ export function BatchTab({ libraryIndex, isLibraryReady }: { libraryIndex: Audio
   const count = parsed.videoIds.length;
   const cachedCount = estimate?.videos.filter(({ cached }) => cached).length ?? 0;
   const neededScans = count - cachedCount;
+  const budget = state?.budget ?? null;
   const uncached = estimate?.videos.filter(({ cached }) => !cached) ?? [];
   const requests = uncached.reduce((sum, { seconds }) => sum + estimateAuddRequests(seconds, estimate?.maxSeconds), 0);
   const hasUnknownLength = uncached.some(({ seconds }) => seconds === 0);
@@ -329,8 +331,8 @@ export function BatchTab({ libraryIndex, isLibraryReady }: { libraryIndex: Audio
       ? 'Lô hiện tại chưa xong. Hãy chờ hoặc hủy phần chưa quét.'
       : count > MAX_BATCH_VIDEOS
         ? `Mỗi lô tối đa ${MAX_BATCH_VIDEOS} video. Hãy bớt ${count - MAX_BATCH_VIDEOS} link.`
-        : state && neededScans > state.remainingScans
-          ? `Lô này cần ${neededScans} lượt nhưng hôm nay chỉ còn ${state.remainingScans} lượt.`
+        : budget && estimate && requests > remainingBudgetRequests(budget)
+          ? budgetRefusal(requests, budget)
           : '';
   const skipped = [
     parsed.invalid > 0 ? `${parsed.invalid} dòng không phải link video` : '',
@@ -371,8 +373,13 @@ export function BatchTab({ libraryIndex, isLibraryReady }: { libraryIndex: Audio
             <div className="grid gap-1.5 rounded-xl bg-brand-50 p-3 text-xs text-slate-600">
               <StatRow label="Video sẽ quét" value={`${count} / ${MAX_BATCH_VIDEOS}`} />
               <StatRow label="Yêu cầu AudD ước tính" value={count === 0 ? '0' : requestText} />
-              <StatRow label={`Lượt sẽ dùng${cachedCount ? ` (${cachedCount} video đã có kết quả)` : ''}`} value={String(neededScans)} />
-              <StatRow label="Lượt còn lại hôm nay" value={state ? `${state.remainingScans} / ${state.dailyLimit}` : '...'} />
+              <StatRow label={`Video cần gửi AudD${cachedCount ? ` (${cachedCount} video đã có kết quả)` : ''}`} value={String(neededScans)} />
+              {budget && (
+                <>
+                  <StatRow label="Chi phí thêm ước tính" value={estimate ? formatMoney(extraCost(requests, budget), budget.currency) : '...'} />
+                  <StatRow label="Ngân sách tháng còn" value={formatMoney(remainingMoney(budget), budget.currency)} />
+                </>
+              )}
             </div>
             {skipped && <p className="mt-2 text-xs text-amber-800">{skipped}</p>}
             {problem && <p className="mt-2 text-xs text-rose-700">{problem}</p>}

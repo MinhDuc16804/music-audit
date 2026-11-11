@@ -22,6 +22,11 @@ export interface BudgetView {
   currency: string;
   /** Trần chi phí mỗi tháng. */
   amount: number;
+  /** Phí gói mỗi tháng, trả cả khi chưa quét gì. */
+  planFee: number;
+  /** Số yêu cầu đã gồm trong phí gói. */
+  planRequests: number;
+  /** Giá cho 1.000 yêu cầu vượt gói. */
   pricePer1000: number;
   warnPercent: number;
   /** Số yêu cầu mà trần chi phí mua được. */
@@ -42,8 +47,24 @@ export function requestsForSeconds(seconds: number, maxSeconds: number): number 
   return Math.max(1, Math.ceil(length / SCAN_SEGMENT_SECONDS));
 }
 
-export function costOfRequests(requests: number, pricePer1000: number): number {
-  return (requests * pricePer1000) / 1000;
+/** Tiền phải trả trong tháng khi đã dùng từng ấy yêu cầu: phí gói cộng phần vượt gói. */
+export function monthCost(requests: number, view: Pick<BudgetView, 'planFee' | 'planRequests' | 'pricePer1000'>): number {
+  return view.planFee + (Math.max(0, requests - view.planRequests) * view.pricePer1000) / 1000;
+}
+
+/** Tiền thêm nếu gửi thêm từng ấy yêu cầu, tính từ số đã dùng trong tháng. Còn trong gói thì không tốn thêm. */
+export function extraCost(requests: number, view: BudgetView): number {
+  return monthCost(view.chargedRequests + requests, view) - monthCost(view.chargedRequests, view);
+}
+
+/** Tiền còn được tiêu trong tháng, đã trừ phần đang giữ chỗ. */
+export function remainingMoney(view: BudgetView): number {
+  return Math.max(0, view.amount - monthCost(view.chargedRequests, view));
+}
+
+/** Số yêu cầu còn lại trong gói, chưa phải trả thêm. */
+export function includedLeft(view: BudgetView): number {
+  return Math.max(0, view.planRequests - view.chargedRequests);
 }
 
 /** Số yêu cầu còn được gửi trong tháng. */
@@ -97,6 +118,6 @@ export const BUDGET_REFUSAL_TEXT = 'ngân sách tháng chỉ còn';
 /** Câu báo khi ngân sách không đủ cho một lượt quét. */
 export function budgetRefusal(needed: number, view: BudgetView): string {
   const left = remainingBudgetRequests(view);
-  const money = (requests: number) => formatMoney(costOfRequests(requests, view.pricePer1000), view.currency);
-  return `Lượt quét cần tối đa ${needed} yêu cầu AudD (${money(needed)}), nhưng ${BUDGET_REFUSAL_TEXT} ${left} yêu cầu (${money(left)}). Hãy quét ít hơn, hoặc nhờ người quản trị tăng AUDD_MONTHLY_BUDGET.`;
+  const money = (amount: number) => formatMoney(amount, view.currency);
+  return `Lượt quét cần tối đa ${needed} yêu cầu AudD (${money(extraCost(needed, view))}), nhưng ${BUDGET_REFUSAL_TEXT} ${left} yêu cầu (${money(remainingMoney(view))}). Hãy quét ít hơn, hoặc nhờ người quản trị tăng AUDD_MONTHLY_BUDGET.`;
 }

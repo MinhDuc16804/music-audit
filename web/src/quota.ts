@@ -27,12 +27,7 @@ export interface QuotaReading {
 }
 
 export interface QuotaResponse extends QuotaReading {
-  remainingScans: number;
-  dailyLimit: number;
   maxChannelRequests: number;
-  /** Số yêu cầu AudD người này còn dùng được cho quét cả kênh hôm nay. */
-  remainingChannelRequests: number;
-  dailyChannelRequests: number;
   /** Ngân sách AudD tháng này của cả app, null nếu chưa bật. */
   budget: BudgetView | null;
 }

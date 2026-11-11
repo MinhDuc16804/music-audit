@@ -5,12 +5,18 @@
  * app dừng giữa lượt quét thì phần đó coi như đã chi, thừa còn hơn thiếu.
  *
  * Bật bằng AUDD_MONTHLY_BUDGET và AUDD_PRICE_PER_1000. Để trống AUDD_MONTHLY_BUDGET thì tắt.
+ * Gói AudD có phí cố định kèm số yêu cầu được cấp (AUDD_PLAN_FEE, AUDD_PLAN_REQUESTS), phần vượt tính theo AUDD_PRICE_PER_1000.
  */
 
 import type { BudgetKind, BudgetView } from '../src/budget.ts';
 
 export interface BudgetConfig {
   amount: number;
+  /** Phí gói mỗi tháng, trả cả khi chưa quét gì. */
+  planFee: number;
+  /** Số yêu cầu đã gồm trong phí gói. */
+  planRequests: number;
+  /** Giá cho 1.000 yêu cầu vượt gói. */
   pricePer1000: number;
   currency: string;
   warnPercent: number;
@@ -45,6 +51,15 @@ const positiveNumber = (value: string | undefined) => {
   return Number.isFinite(number) && number > 0 ? number : null;
 };
 
+/** Để trống là 0, sai thì null. */
+const optionalNumber = (value: string | undefined, isInteger = false) => {
+  if (!value?.trim()) {
+    return 0;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 && (!isInteger || Number.isInteger(number)) ? number : null;
+};
+
 /**
  * Để trống AUDD_MONTHLY_BUDGET thì tắt. Đã đặt mà sai, hoặc thiếu giá, thì ngân sách là 0 để chặn hết,
  * vì lỗi cấu hình không được thành không giới hạn.
@@ -55,14 +70,19 @@ export function parseBudgetConfig(env: Record<string, string | undefined>): Budg
   }
   const amount = positiveNumber(env.AUDD_MONTHLY_BUDGET);
   const pricePer1000 = positiveNumber(env.AUDD_PRICE_PER_1000);
+  const planFee = optionalNumber(env.AUDD_PLAN_FEE);
+  const planRequests = optionalNumber(env.AUDD_PLAN_REQUESTS, true);
   const warn = Number(env.AUDD_BUDGET_WARN_PERCENT);
   const currency = env.AUDD_BUDGET_CURRENCY?.trim().slice(0, 8) || DEFAULT_CURRENCY;
-  const isValid = amount !== null && pricePer1000 !== null;
+  // Ngân sách thấp hơn phí gói thì không trả nổi gói, coi như cấu hình sai.
+  const isValid = amount !== null && pricePer1000 !== null && planFee !== null && planRequests !== null && amount >= planFee;
   if (!isValid) {
-    console.error('AUDD_MONTHLY_BUDGET hoặc AUDD_PRICE_PER_1000 không hợp lệ, app chặn mọi lượt quét tới khi sửa .env.');
+    console.error('Cấu hình ngân sách AudD không hợp lệ (AUDD_MONTHLY_BUDGET, AUDD_PRICE_PER_1000, AUDD_PLAN_FEE, AUDD_PLAN_REQUESTS), app chặn mọi lượt quét tới khi sửa .env.');
   }
   return {
     amount: isValid ? amount : 0,
+    planFee: isValid ? planFee : 0,
+    planRequests: isValid ? planRequests : 0,
     pricePer1000: pricePer1000 ?? 1,
     currency,
     warnPercent: Number.isFinite(warn) && warn > 0 && warn <= 100 ? warn : DEFAULT_WARN_PERCENT,
@@ -83,9 +103,12 @@ export function getMonthEnd(month: string): string {
   return `${month}-${String(lastDay).padStart(2, '0')}`;
 }
 
-/** Số yêu cầu mà trần chi phí mua được, làm tròn xuống. */
+/** Số yêu cầu mà trần chi phí mua được: phần trong gói cộng phần vượt gói, làm tròn xuống. */
 export function getBudgetRequests(config: BudgetConfig): number {
-  return Math.floor((config.amount / config.pricePer1000) * 1000 + 1e-9);
+  if (config.amount <= 0 || config.amount < config.planFee) {
+    return 0;
+  }
+  return config.planRequests + Math.floor(((config.amount - config.planFee) / config.pricePer1000) * 1000 + 1e-9);
 }
 
 const emptyLedger = (month: string): BudgetLedger => ({ month, charged: 0, byUser: {}, byKind: {} });
@@ -162,6 +185,8 @@ export function createMonthlyBudget(config: BudgetConfig, store: BudgetStore, ge
         monthEnd: getMonthEnd(book.month),
         currency: config.currency,
         amount: config.amount,
+        planFee: config.planFee,
+        planRequests: config.planRequests,
         pricePer1000: config.pricePer1000,
         warnPercent: config.warnPercent,
         budgetRequests,

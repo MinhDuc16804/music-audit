@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createMonthlyBudget, getBudgetMonth, getBudgetRequests, getMonthEnd, parseBudgetConfig } from './monthlyBudget.ts';
 import type { BudgetConfig, BudgetLedger } from './monthlyBudget.ts';
 
-const CONFIG: BudgetConfig = { amount: 1, pricePer1000: 5, currency: 'USD', warnPercent: 80 }; // 200 yêu cầu
+const CONFIG: BudgetConfig = { amount: 1, planFee: 0, planRequests: 0, pricePer1000: 5, currency: 'USD', warnPercent: 80 }; // 200 yêu cầu
 
 function memoryStore(saved: BudgetLedger | null = null) {
   const files = new Map<string, BudgetLedger>(saved ? [[saved.month, saved]] : []);
@@ -24,6 +24,8 @@ describe('parseBudgetConfig', () => {
   it('đọc đủ các biến, có mặc định cho đơn vị tiền và ngưỡng cảnh báo', () => {
     expect(parseBudgetConfig({ AUDD_MONTHLY_BUDGET: '100', AUDD_PRICE_PER_1000: '5' })).toEqual({
       amount: 100,
+      planFee: 0,
+      planRequests: 0,
       pricePer1000: 5,
       currency: 'USD',
       warnPercent: 80,
@@ -37,6 +39,9 @@ describe('parseBudgetConfig', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     expect(parseBudgetConfig({ AUDD_MONTHLY_BUDGET: 'abc', AUDD_PRICE_PER_1000: '5' })?.amount).toBe(0);
     expect(parseBudgetConfig({ AUDD_MONTHLY_BUDGET: '100' })?.amount).toBe(0);
+    expect(parseBudgetConfig({ AUDD_MONTHLY_BUDGET: '20', AUDD_PRICE_PER_1000: '5', AUDD_PLAN_REQUESTS: '1000.5' })?.amount).toBe(0);
+    // Ngân sách thấp hơn phí gói thì không trả nổi gói.
+    expect(parseBudgetConfig({ AUDD_MONTHLY_BUDGET: '3', AUDD_PRICE_PER_1000: '5', AUDD_PLAN_FEE: '5' })?.amount).toBe(0);
     expect(error).toHaveBeenCalled();
     error.mockRestore();
   });
@@ -56,6 +61,20 @@ describe('ngày tháng', () => {
   it('số yêu cầu mua được làm tròn xuống', () => {
     expect(getBudgetRequests({ ...CONFIG, amount: 100 })).toBe(20_000);
     expect(getBudgetRequests({ ...CONFIG, amount: 0.012 })).toBe(2);
+  });
+
+  it('đọc gói AudD: phí gói, số yêu cầu được cấp, giá phần vượt', () => {
+    const config = parseBudgetConfig({ AUDD_MONTHLY_BUDGET: '20', AUDD_PLAN_FEE: '5', AUDD_PLAN_REQUESTS: '1000', AUDD_PRICE_PER_1000: '5' });
+    expect(config).toMatchObject({ amount: 20, planFee: 5, planRequests: 1000, pricePer1000: 5 });
+  });
+
+  it('ngân sách theo gói: phần trong gói cộng phần vượt gói', () => {
+    const plan = { ...CONFIG, planFee: 5, planRequests: 1000 };
+    expect(getBudgetRequests({ ...plan, amount: 20 })).toBe(4_000);
+    expect(getBudgetRequests({ ...plan, amount: 5 })).toBe(1_000);
+    expect(getBudgetRequests({ ...plan, amount: 200 })).toBe(40_000);
+    expect(getBudgetRequests({ ...CONFIG, amount: 450, planFee: 450, planRequests: 100_000, pricePer1000: 4.5 })).toBe(100_000);
+    expect(getBudgetRequests({ ...CONFIG, amount: 900, planFee: 850, planRequests: 200_000, pricePer1000: 4.25 })).toBe(211_764);
   });
 });
 

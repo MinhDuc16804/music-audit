@@ -79,9 +79,6 @@ export interface BatchRunnerDeps {
   isCached: (videoId: string) => boolean;
   /** user là người tạo lô, để tính ngân sách đúng người. */
   scan: (url: string, user: string) => Promise<IdentifyResult>;
-  /** Giữ chỗ từng ấy lượt, trả về false nếu không đủ. */
-  reserve: (user: string, count: number) => boolean;
-  release: (user: string, count: number) => void;
   logResult: (user: string, target: string, outcome: 'done' | 'error') => Promise<void>;
   delayMs?: number;
 }
@@ -204,10 +201,6 @@ export function createBatchRunner(deps: BatchRunnerDeps) {
         status: 'queued',
         cached: deps.isCached(videoId),
       }));
-      const needed = items.filter(({ cached }) => !cached).length;
-      if (!deps.reserve(user, needed)) {
-        throw new BatchError(429, `Lô này cần ${needed} lượt, nhiều hơn số lượt còn lại hôm nay.`);
-      }
       const batch: Batch = { id: randomUUID(), user, createdAt: new Date().toISOString(), status: 'running', items };
       batches.push(batch);
       prune();
@@ -216,7 +209,7 @@ export function createBatchRunner(deps: BatchRunnerDeps) {
       return batch;
     },
 
-    /** Video đang quét dở vẫn chạy nốt, các video còn chờ được hoàn lại lượt. */
+    /** Video đang quét dở vẫn chạy nốt, các video còn chờ bị hủy. */
     async cancel(user: string, batchId: string): Promise<Batch> {
       await ready();
       const batch = findOwn(user, batchId);
@@ -224,7 +217,6 @@ export function createBatchRunner(deps: BatchRunnerDeps) {
       queued.forEach((item) => {
         item.status = 'cancelled';
       });
-      deps.release(user, queued.filter(({ cached }) => !cached).length);
       settle(batch);
       await persist();
       return batch;

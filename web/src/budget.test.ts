@@ -5,7 +5,10 @@ import {
   budgetDaysLeft,
   budgetResetDay,
   budgetState,
-  costOfRequests,
+  extraCost,
+  includedLeft,
+  monthCost,
+  remainingMoney,
   formatBudgetRange,
   formatMoney,
   remainingBudgetRequests,
@@ -19,6 +22,8 @@ const view = (charged: number, held = 0): BudgetView => ({
   monthEnd: '2026-11-30',
   currency: 'USD',
   amount: 100,
+  planFee: 0,
+  planRequests: 0,
   pricePer1000: 5,
   warnPercent: 80,
   budgetRequests: 20_000,
@@ -45,10 +50,36 @@ describe('requestsForSeconds', () => {
   });
 });
 
-describe('costOfRequests và formatMoney', () => {
-  it('quy số yêu cầu ra tiền', () => {
-    expect(costOfRequests(1260, 5)).toBeCloseTo(6.3);
+// Gói 5 USD gồm 1.000 yêu cầu, vượt gói 5 USD cho 1.000, ngân sách 20 USD là 4.000 yêu cầu.
+const plan = (charged: number, held = 0): BudgetView => ({ ...view(charged, held), amount: 20, planFee: 5, planRequests: 1000, budgetRequests: 4000 });
+
+describe('tính tiền theo gói', () => {
+  it('phí gói tính cả khi chưa quét, phần trong gói không tốn thêm', () => {
+    expect(monthCost(0, plan(0))).toBe(5);
+    expect(monthCost(1000, plan(0))).toBe(5);
+    expect(monthCost(1850, plan(0))).toBeCloseTo(9.25);
+    expect(monthCost(4000, plan(0))).toBeCloseTo(20);
   });
+
+  it('không có gói thì tính đều theo giá', () => {
+    expect(monthCost(1260, view(0))).toBeCloseTo(6.3);
+  });
+
+  it('chi phí thêm của một lượt quét tính từ số đã dùng', () => {
+    expect(extraCost(90, plan(500))).toBe(0);
+    expect(extraCost(90, plan(950))).toBeCloseTo(0.2);
+    expect(extraCost(90, plan(1850))).toBeCloseTo(0.45);
+  });
+
+  it('tiền còn lại và số yêu cầu còn trong gói', () => {
+    expect(remainingMoney(plan(0))).toBe(15);
+    expect(remainingMoney(plan(1850))).toBeCloseTo(10.75);
+    expect(includedLeft(plan(300))).toBe(700);
+    expect(includedLeft(plan(1850))).toBe(0);
+  });
+});
+
+describe('formatMoney', () => {
 
   it('viết tiền theo kiểu Việt Nam, hai chữ số lẻ', () => {
     expect(formatMoney(6.3, 'USD')).toBe('6,30 USD');
@@ -113,6 +144,7 @@ describe('budgetRefusal', () => {
     const text = budgetRefusal(1260, view(19_000));
     expect(text).toContain('1260 yêu cầu AudD (6,30 USD)');
     expect(text).toContain('còn 1000 yêu cầu (5,00 USD)');
+    expect(budgetRefusal(90, plan(3960))).toContain('90 yêu cầu AudD (0,45 USD), nhưng ngân sách tháng chỉ còn 40 yêu cầu (0,20 USD)');
     expect(text).toContain('AUDD_MONTHLY_BUDGET');
   });
 });
