@@ -1,5 +1,6 @@
 # Chạy app bằng: docker compose up -d --build
 # Cổng chỉ mở cho chính máy này vì app không có trang đăng nhập riêng. Cho nhân viên vào qua Cloudflare Tunnel và Access, xem web/README.md.
+# Chạy kèm đường hầm Cloudflare: docker compose --profile tunnel up -d --build (cần CLOUDFLARE_TUNNEL_TOKEN trong .env).
 
 services:
   music-audit:
@@ -19,6 +20,20 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+  # Đường hầm ra Cloudflare: máy không phải mở cổng, mọi người vào qua tên miền và phải đăng nhập Cloudflare Access trước.
+  # Trong trang Tunnel, đặt Public hostname trỏ tới http://music-audit:8080. Chỉ chạy khi bật profile tunnel.
+  cloudflared:
+    image: cloudflare/cloudflared:2025.4.2
+    profiles: ["tunnel"]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      # Chỉ chuyển đúng biến này, không dùng env_file để đường hầm không thấy khóa AudD và YouTube.
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      music-audit:
+        condition: service_healthy
 
 volumes:
   music-audit-data:

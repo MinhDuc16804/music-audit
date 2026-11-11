@@ -59,14 +59,38 @@ docker compose up -d --build
 
 3. Mở `http://localhost:8080` trên chính máy đó để kiểm tra.
 
-App không có trang đăng nhập riêng nên `compose.yml` chỉ mở cổng cho chính máy này. Muốn cho nhân viên vào, hãy dùng Cloudflare Tunnel và
-Cloudflare Access trỏ tới `http://localhost:8080`, đừng đổi cổng thành mở ra mạng.
+App không có trang đăng nhập riêng nên `compose.yml` chỉ mở cổng cho chính máy này, đừng đổi cổng thành mở ra mạng.
+Muốn cho nhân viên vào, dùng Cloudflare Tunnel và Cloudflare Access theo mục dưới.
 
-Nên điền `CF_ACCESS_TEAM_DOMAIN` (ví dụ `ten-cong-ty.cloudflareaccess.com`) và `CF_ACCESS_AUD` (Application Audience Tag trong trang
-ứng dụng của Access) vào `.env`. Khi có đủ hai biến, server kiểm chữ ký token Access của từng yêu cầu và lấy email từ token,
-nên không ai giả được email để có thêm lượt. Yêu cầu không có token hợp lệ bị từ chối. Thiếu hai biến này thì app tin header email
-như trước, chỉ an toàn khi không ai gọi thẳng được vào cổng 8080. Gói miễn phí của Cloudflare chặn yêu cầu trên 100 MB,
-nên app giới hạn file tải lên ở 95 MB. File lớn hơn thì xuất riêng phần âm thanh.
+### Đăng nhập qua Cloudflare Access
+
+Người dùng mở tên miền của app, Cloudflare hỏi email rồi gửi mã đăng nhập một lần (hoặc đăng nhập Google nếu bật). Không có form đăng ký:
+người quản trị đặt luật ai được vào, ví dụ mọi email đuôi công ty. App không lưu mật khẩu. Gói miễn phí của Cloudflare Zero Trust đủ cho 50 người.
+
+Cần có tên miền công ty đang quản lý trên Cloudflare. Các bước làm một lần trong trang [Cloudflare Zero Trust](https://one.dash.cloudflare.com/):
+
+1. **Đặt tên đội.** Settings > Custom Pages (hoặc lần đầu vào Zero Trust) đặt team name. Tên miền đội có dạng `ten-doi.cloudflareaccess.com`.
+2. **Tạo đường hầm.** Networks > Tunnels > Create a tunnel > Cloudflared, đặt tên, chép token ở bước cài đặt vào `.env` dòng `CLOUDFLARE_TUNNEL_TOKEN`.
+   Ở bước Public hostname, chọn tên miền con, ví dụ `kiemtranhac.ten-mien-cong-ty`, Service là `HTTP` và `music-audit:8080`.
+3. **Tạo ứng dụng Access.** Access > Applications > Add an application > Self-hosted, tên miền đúng như bước 2.
+   Thêm policy Allow, Include chọn **Emails ending in** và điền đuôi email công ty, hoặc **Emails** để liệt kê từng người.
+   Login methods để **One-time PIN**, thêm Google nếu công ty dùng Google Workspace.
+4. **Chép hai giá trị vào `.env`.** `CF_ACCESS_TEAM_DOMAIN` là tên miền đội ở bước 1, `CF_ACCESS_AUD` là Application Audience (AUD) Tag trong trang ứng dụng ở bước 3.
+5. **Chạy app kèm đường hầm:**
+
+```bash
+docker compose --profile tunnel up -d --build
+```
+
+6. Mở tên miền ở bước 2 bằng cửa sổ ẩn danh: phải thấy trang đăng nhập của Cloudflare, nhập email công ty, nhận mã, vào được app.
+   Email ngoài danh sách phải bị từ chối.
+
+Khi có đủ `CF_ACCESS_TEAM_DOMAIN` và `CF_ACCESS_AUD`, server kiểm chữ ký token Access của từng yêu cầu và lấy email từ token, nên không ai giả được email
+trong nhật ký và sổ chi ngân sách. Yêu cầu không có token hợp lệ bị từ chối, kể cả khi mở `http://localhost:8080` trên chính máy chủ, nên sau khi bật thì
+mọi người, kể cả người quản trị, dùng app qua tên miền. Thiếu hai biến này thì app tin header email như trước, chỉ an toàn khi không ai gọi thẳng được vào cổng 8080.
+
+Muốn thêm hoặc bớt người dùng thì sửa policy của ứng dụng trong Access, không cần sửa app. Đăng xuất bằng đường dẫn `/cdn-cgi/access/logout` trên tên miền của app.
+Gói miễn phí của Cloudflare chặn yêu cầu trên 100 MB, nên app giới hạn file tải lên ở 95 MB. File lớn hơn thì xuất riêng phần âm thanh.
 
 Trên VPS, dữ liệu quét trong `out/` nằm ở nhà cung cấp ngoài công ty, và YouTube dễ chặn IP máy chủ hơn, nên quét bằng link có thể không chạy.
 
