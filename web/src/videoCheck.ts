@@ -3,9 +3,9 @@
  *
  * AudD trả từng đoạn 12 giây, mỗi đoạn có thể có nhiều bài ứng viên, và có thể nhận nhầm cả lời nói thành bài hát.
  * Bài có bằng chứng là bài có vị trí trong bài tiến đều theo video qua ít nhất hai đoạn.
- * Bài ngoài thư viện có bằng chứng thì chặn. Không có bằng chứng thì bỏ qua nếu mọi đoạn của nó đều có bài trong thư
- * viện có bằng chứng, ngược lại chuyển cho người duyệt.
- * Được dùng khi mọi bài còn lại đều khớp chắc và AudD nhận ra đủ phần lớn thời lượng.
+ * Bài ngoài thư viện có bằng chứng thì chặn. Không có bằng chứng thì không chặn nhưng vẫn chuyển cho người duyệt, kể cả khi
+ * mọi đoạn của nó đều có bài trong thư viện có bằng chứng (nhiều khả năng nhận nhầm): khớp thì tin, không khớp thì chưa biết.
+ * Được dùng khi mọi bài đều khớp chắc và AudD nhận ra đủ phần lớn thời lượng. Kết luận luôn ghi tỷ lệ AudD nhận ra.
  */
 
 import { findAudioLibraryTrack, findNearAudioLibraryTrack } from './audioLibrary.ts';
@@ -42,7 +42,7 @@ export interface ScanSegment {
 }
 
 export type ScanCoverage =
-  | { kind: 'enough' }
+  | { kind: 'enough'; percent: number }
   | { kind: 'unknown' }
   | { kind: 'cut_off' }
   | { kind: 'low'; percent: number };
@@ -84,7 +84,7 @@ export interface CheckedTrack {
   hasEvidence?: boolean;
   /** Bài ngoài thư viện không có bằng chứng, cần người nghe lại. */
   isDoubtful?: boolean;
-  /** Bài ngoài thư viện không có bằng chứng, chỉ xuất hiện cùng bài trong thư viện có bằng chứng, nên không tính. */
+  /** Bài ngoài thư viện không có bằng chứng, chỉ xuất hiện cùng bài trong thư viện có bằng chứng: nhiều khả năng nhận nhầm, nhưng người duyệt vẫn phải nghe lại. */
   isIgnored?: boolean;
 }
 
@@ -104,7 +104,8 @@ export function getScanCoverage(segmentCount: number, durationSeconds = 0, maxSe
     return { kind: 'cut_off' };
   }
   const coverage = Math.min(1, (segmentCount * SCAN_SEGMENT_SECONDS) / durationSeconds);
-  return coverage >= MIN_COVERAGE ? { kind: 'enough' } : { kind: 'low', percent: Math.round(coverage * 100) };
+  const percent = Math.round(coverage * 100);
+  return coverage >= MIN_COVERAGE ? { kind: 'enough', percent } : { kind: 'low', percent };
 }
 
 /** Đổi mm:ss hoặc h:mm:ss thành số giây. Không đọc được thì trả về undefined. */
@@ -160,9 +161,14 @@ function getCoverageDetail(coverage: ScanCoverage): string {
   return 'Chưa biết độ dài nội dung nên không xác định được AudD đã nhận ra bao nhiêu phần. Hãy nghe kiểm tra.';
 }
 
-/** Bài chưa khớp chắc thì cần tra trong Studio. Bài đã bị bỏ qua vì nhiều khả năng là nhận nhầm thì không cần. */
-export function needsStudioLookup({ libraryTrack, isIgnored }: Pick<CheckedTrack, 'libraryTrack' | 'isIgnored'>): boolean {
-  return !isIgnored && (!libraryTrack || Boolean(libraryTrack.unconfirmed));
+/** Bài chưa khớp chắc thì cần tra trong Studio, kể cả bài nhiều khả năng là nhận nhầm. */
+export function needsStudioLookup({ libraryTrack }: Pick<CheckedTrack, 'libraryTrack'>): boolean {
+  return !libraryTrack || Boolean(libraryTrack.unconfirmed);
+}
+
+/** Tên bài kèm nghệ sĩ để ghi trong câu kết luận. */
+function trackNames(tracks: CheckedTrack[]): string {
+  return tracks.map(({ track }) => `“${track.title}”${track.artists ? ` (${track.artists})` : ''}`).join(', ');
 }
 
 export function getVideoVerdict(result: IdentifyResult, libraryIndex: AudioLibraryIndex): VideoVerdict {
@@ -225,6 +231,15 @@ export function getVideoVerdict(result: IdentifyResult, libraryIndex: AudioLibra
       tracks,
     };
   }
+  const ignored = tracks.filter(({ isIgnored }) => isIgnored);
+  if (ignored.length > 0) {
+    return {
+      kind: 'review',
+      title: 'Cần người duyệt',
+      detail: `AudD còn đưa ra ${ignored.length} bài ngoài thư viện ở cùng đoạn với bài trong thư viện: ${trackNames(ignored)}. Nhiều khả năng là nhận nhầm, nhưng hãy nghe lại đúng các đoạn đó trước khi dùng.`,
+      tracks,
+    };
+  }
   if (tracks.some(({ libraryTrack }) => libraryTrack?.unconfirmed)) {
     return {
       kind: 'review',
@@ -241,9 +256,9 @@ export function getVideoVerdict(result: IdentifyResult, libraryIndex: AudioLibra
   return {
     kind: 'allowed',
     title: 'Được dùng',
-    detail: `Mọi bài nhận ra đều có trong YouTube Audio Library. ${
+    detail: `AudD nhận ra khoảng ${coverage.percent}% thời lượng, mọi bài nhận ra đều có trong YouTube Audio Library. ${
       needsAttribution ? 'Có bài phải ghi nguồn trong mô tả video. ' : ''
-    }Máy có thể bỏ sót nhạc khác trong video.`,
+    }Máy có thể bỏ sót nhạc nhỏ hoặc lẫn dưới lời nói${coverage.percent < 100 ? ' và ở phần chưa nhận ra' : ''}.`,
     tracks,
   };
 }

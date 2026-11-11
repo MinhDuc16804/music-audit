@@ -66,6 +66,7 @@ describe('getVideoVerdict', () => {
     const result = verdict(scan('block', [{ title: 'Bai Thu Vien', artists: 'Ca Si X, Ca Si A' }]));
     expect(result.kind).toBe('allowed');
     expect(result.detail).toContain('bỏ sót');
+    expect(result.detail).toMatch(/AudD nhận ra khoảng \d+% thời lượng/);
     expect(result.detail).not.toContain('ghi nguồn');
   });
 
@@ -178,10 +179,12 @@ describe('getVideoVerdict theo bằng chứng', () => {
     expect(verdict(segmented([library, outside], [[0, 1], [0, 1]])).kind).toBe('blocked');
   });
 
-  it('bỏ qua bài không có bằng chứng nằm cùng đoạn với bài thư viện có bằng chứng', () => {
+  it('bài nhiều khả năng nhận nhầm không bị tự bỏ qua mà chuyển người duyệt, có ghi tên bài', () => {
     const result = verdict(segmented([library, outside], [[0], [0, 1], [0]]));
-    expect(result.kind).toBe('allowed');
+    expect(result.kind).toBe('review');
     expect(result.tracks[1].isIgnored).toBe(true);
+    expect(result.detail).toContain(`“${outside.title}”`);
+    expect(result.detail).toContain('nghe lại');
   });
 
   it('bài không có bằng chứng ở đoạn riêng thì chuyển người duyệt', () => {
@@ -292,12 +295,12 @@ describe('getVideoVerdict theo độ phủ', () => {
 
 describe('getScanCoverage', () => {
   it('đủ từ 80% thời lượng', () => {
-    expect(getScanCoverage(8, 120, 3600)).toEqual({ kind: 'enough' });
+    expect(getScanCoverage(8, 120, 3600)).toEqual({ kind: 'enough', percent: 80 });
     expect(getScanCoverage(7, 120, 3600)).toEqual({ kind: 'low', percent: 70 });
   });
 
   it('đoạn cuối ngắn hơn 12 giây vẫn tính đủ', () => {
-    expect(getScanCoverage(1, 8, 3600)).toEqual({ kind: 'enough' });
+    expect(getScanCoverage(1, 8, 3600)).toEqual({ kind: 'enough', percent: 100 });
   });
 
   it('thiếu độ dài là chưa biết', () => {
@@ -360,8 +363,8 @@ describe('needsStudioLookup', () => {
     expect(needsStudioLookup({ libraryTrack: { ...libraryTrack, unconfirmed: true } })).toBe(true);
   });
 
-  it('bài đã bỏ qua vì có thể nhận nhầm thì không cần tra', () => {
-    expect(needsStudioLookup({ isIgnored: true })).toBe(false);
+  it('bài nhiều khả năng nhận nhầm vẫn cần tra vì người duyệt phải xác nhận', () => {
+    expect(needsStudioLookup({})).toBe(true);
   });
 });
 

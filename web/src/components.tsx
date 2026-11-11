@@ -78,8 +78,8 @@ function StudioLookupLink({ title }: { title: string }) {
   );
 }
 
-type TrackTone = 'ok' | 'warn' | 'bad' | 'ignored';
-const TONE_BARS: Record<TrackTone, string> = { ok: 'bg-emerald-500', warn: 'bg-amber-500', bad: 'bg-rose-600', ignored: 'bg-slate-400' };
+type TrackTone = 'ok' | 'warn' | 'bad';
+const TONE_BARS: Record<TrackTone, string> = { ok: 'bg-emerald-500', warn: 'bg-amber-500', bad: 'bg-rose-600' };
 const TIME_CHIP = 'rounded-lg border border-brand-200 bg-white px-2 py-0.5 font-medium text-brand-800 tabular-nums';
 
 /** Bài nằm ở đoạn nào của video. Có link video thì mỗi mốc mở YouTube đúng giây đó, file tải lên thì chỉ hiện chữ. */
@@ -126,10 +126,7 @@ function TrackTimeline({ ranges, tone, videoUrl, durationSeconds }: { ranges: Tr
 }
 
 function getTrackTone({ libraryTrack, nearTrack, isDoubtful, isIgnored }: CheckedTrack): TrackTone {
-  if (isIgnored) {
-    return 'ignored';
-  }
-  if (nearTrack || isDoubtful || libraryTrack?.unconfirmed) {
+  if (nearTrack || isDoubtful || isIgnored || libraryTrack?.unconfirmed) {
     return 'warn';
   }
   return libraryTrack ? 'ok' : 'bad';
@@ -164,18 +161,16 @@ export function TrackList({ tracks, videoUrl = '', durationSeconds = 0 }: { trac
                   Phải ghi nguồn trong mô tả video, lấy đúng mẫu trong YouTube Audio Library.
                 </p>
               )}
-              {needsStudioLookup({ libraryTrack, isIgnored }) && <StudioLookupLink title={track.title} />}
+              {needsStudioLookup({ libraryTrack }) && <StudioLookupLink title={track.title} />}
             </div>
           </div>
           <span
             className={`inline-flex w-fit shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${
-              isIgnored
-                ? 'bg-slate-100 text-slate-600 ring-slate-200'
-                : nearTrack || isDoubtful || libraryTrack?.unconfirmed
-                  ? 'bg-amber-50 text-amber-800 ring-amber-200'
-                  : libraryTrack
-                    ? 'bg-emerald-50 text-emerald-800 ring-emerald-200'
-                    : 'bg-rose-50 text-rose-800 ring-rose-200'
+              nearTrack || isDoubtful || isIgnored || libraryTrack?.unconfirmed
+                ? 'bg-amber-50 text-amber-800 ring-amber-200'
+                : libraryTrack
+                  ? 'bg-emerald-50 text-emerald-800 ring-emerald-200'
+                  : 'bg-rose-50 text-rose-800 ring-rose-200'
             }`}
           >
             {nearTrack || isDoubtful || isIgnored || libraryTrack?.unconfirmed ? (

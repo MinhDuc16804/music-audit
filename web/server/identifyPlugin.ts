@@ -41,8 +41,13 @@ import type { BudgetKind } from '../src/budget.ts';
 export const ROUTE = '/api/identify';
 export const FILE_ROUTE = '/api/identify-file';
 const MAX_BODY_BYTES = 2048;
-// AudD trả kết quả ngay trong yêu cầu, file dài có thể mất vài phút.
-const PROCESS_TIMEOUT_MS = 15 * 60_000;
+/**
+ * Lưới an toàn cho lệnh treo, phải dài hơn tổng thời gian chờ của chính lệnh Python: đọc độ dài trên YouTube (60 giây),
+ * tách âm thanh (TIMEOUT_SECONDS trong extract.py) rồi chờ AudD (REQUEST_TIMEOUT_SECONDS trong audd.py).
+ * Nếu Node dừng lệnh trong lúc AudD đang xử lý thì AudD vẫn tính phí mà kết quả chưa kịp lưu, lần sau phải trả lại lần nữa.
+ * Để Python tự dừng trước và báo lỗi. Kiểm thử timeouts.test.ts đọc các hằng số bên Python để giữ đúng điều này.
+ */
+export const PROCESS_TIMEOUT_MS = 30 * 60_000;
 const AUDD_TIMEOUT_MS = 30_000;
 const MAX_MESSAGE_LENGTH = 300;
 const MAX_NAME_LENGTH = 120;
