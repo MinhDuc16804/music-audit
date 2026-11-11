@@ -132,9 +132,11 @@ Rồi chạy `tai_am_thanh.bat`, file nằm ở `data/audio/<video_id>.m4a`. Cô
 python -m pip install -r requirements-detect.txt
 ```
 
-```powershell
-New-Item -ItemType Directory -Force models; Invoke-WebRequest https://storage.googleapis.com/mediapipe-models/audio_classifier/yamnet/float32/latest/yamnet.tflite -OutFile models/yamnet.tflite; Invoke-WebRequest https://raw.githubusercontent.com/tensorflow/models/master/research/audioset/yamnet/yamnet_class_map.csv -OutFile models/yamnet_class_map.csv
+```bash
+python audit.py download-models
 ```
+
+Lệnh tải mô hình YAMNet vào `models/` và kiểm mã băm. Google đổi mô hình thì lệnh báo lỗi và không dùng bản lạ, vì ngưỡng lọc được chỉnh theo bản cũ.
 
 ```bash
 python audit.py detect-music --all-videos

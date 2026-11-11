@@ -7,6 +7,8 @@ services:
     build: .
     restart: unless-stopped
     env_file: .env
+    # Node, Python, ffmpeg và máy lọc nhạc cùng chạy. Giới hạn để app lỗi không kéo cả máy chủ treo theo.
+    mem_limit: 3g
     environment:
       # Ghi đè đường dẫn trên máy dev nếu .env có.
       FFMPEG_LOCATION: /usr/bin/ffmpeg

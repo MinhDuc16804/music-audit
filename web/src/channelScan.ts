@@ -183,6 +183,31 @@ export function parseChannelInput(text: string): { url: string; key: string } | 
   return null;
 }
 
+/**
+ * Danh sách kênh được phép quét, đọc từ ALLOWED_CHANNELS: link kênh, @handle hoặc mã UC…, cách nhau bằng dấu phẩy hoặc xuống dòng.
+ * Để trống thì trả về null, tức không giới hạn. Mục viết sai bị bỏ qua và nằm trong invalid để báo, không bao giờ thành cho phép tất cả.
+ */
+export function parseAllowedChannels(value: string | undefined): { keys: Set<string>; invalid: string[] } | null {
+  const entries = (value ?? '')
+    .split(/[,\n]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (entries.length === 0) {
+    return null;
+  }
+  const keys = new Set<string>();
+  const invalid: string[] = [];
+  for (const entry of entries) {
+    const parsed = parseChannelInput(entry);
+    if (parsed) {
+      keys.add(parsed.key);
+    } else {
+      invalid.push(entry);
+    }
+  }
+  return { keys, invalid };
+}
+
 /** Trả về null nếu tùy chọn sai. Chỉ gửi video có nhạc và gửi đoạn ngắn đều cần kết quả của máy lọc. */
 export function parseChannelOptions(value: unknown): ChannelOptions | null {
   const { filter, musicOnly, clips, limit } = (value ?? {}) as Partial<ChannelOptions>;

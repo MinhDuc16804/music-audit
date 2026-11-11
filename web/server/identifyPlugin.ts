@@ -21,7 +21,7 @@ import type { HistoryResponse, HistoryResult } from '../src/history.ts';
 import type { QuotaResponse } from '../src/quota.ts';
 import type { IdentifyResult } from '../src/videoCheck.ts';
 import { getVideoUrl, parseYoutubeVideoId } from '../src/youtubeLink.ts';
-import { parseChannelInput, parseChannelOptions } from '../src/channelScan.ts';
+import { parseAllowedChannels, parseChannelInput, parseChannelOptions } from '../src/channelScan.ts';
 import type { ChannelHistoryResponse } from '../src/channelScan.ts';
 import { BATCH_ROUTE, BatchError, createBatchRunner, matchBatchRoute, parseBatchVideoIds } from './batchRunner.ts';
 import { CHANNEL_ROUTE, ChannelError, createChannelRunner, matchChannelRoute, parseMaxRequests } from './channelRunner.ts';
@@ -30,6 +30,7 @@ import { createAccessGuard, parseAccessConfig } from './accessAuth.ts';
 import { AuddCommandError, createQuotaReader, QUOTA_ROUTE } from './quota.ts';
 import type { ScanJobStarted, ScanJobView } from '../src/scanJob.ts';
 import { createScanJobs, JOB_ROUTE, parseJobId } from './scanJobs.ts';
+import { createUploadSlots, parseMaxUploads } from './uploadSlots.ts';
 import { appendUsage, getUserEmail } from './usageLimit.ts';
 import type { UsageEntry } from './usageLimit.ts';
 import { createMonthlyBudget, parseBudgetConfig } from './monthlyBudget.ts';
@@ -336,6 +337,11 @@ export function createHandlers(getAuditRoot: () => string) {
   });
 
   const maxChannelRequests = parseMaxRequests(process.env.MAX_CHANNEL_SCAN_REQUESTS);
+  // Chỉ quét kênh của công ty: vừa giữ ngân sách, vừa không tải âm thanh của kênh người khác. Để trống ALLOWED_CHANNELS thì không giới hạn.
+  const allowedChannels = parseAllowedChannels(process.env.ALLOWED_CHANNELS);
+  if (allowedChannels?.invalid.length) {
+    console.error(`ALLOWED_CHANNELS có mục không đọc được, đã bỏ qua: ${allowedChannels.invalid.join(', ')}`);
+  }
   const channelHolds = new Map<string, BudgetHold>();
   const quotaReader = createQuotaReader({ run: runAuddCommand });
 
@@ -420,6 +426,12 @@ export function createHandlers(getAuditRoot: () => string) {
         const parsed = typeof channel === 'string' ? parseChannelInput(channel) : null;
         if (!parsed) {
           sendJson(response, 400, { error: 'Chỉ nhận link kênh có @handle hoặc mã UC…, không nhận link video hay playlist.' });
+          return;
+        }
+        if (allowedChannels && !allowedChannels.keys.has(parsed.key)) {
+          sendJson(response, 403, {
+            error: 'Kênh này không nằm trong danh sách kênh của công ty được phép quét. Nhờ người quản trị thêm kênh vào ALLOWED_CHANNELS nếu cần.',
+          });
           return;
         }
         await channelRunner.create(user, parsed, skipShorts === true);
@@ -507,6 +519,7 @@ export function createHandlers(getAuditRoot: () => string) {
   };
 
   const scanJobs = createScanJobs();
+  const uploadSlots = createUploadSlots(parseMaxUploads(process.env.MAX_ACTIVE_UPLOADS));
 
   /** Giữ chỗ ngân sách cho lượt quét lẻ. Không đủ thì báo lỗi 429 và trả về false. */
   const checkBudget = async (response: ServerResponse, user: string, kind: 'link' | 'file', target: string, estimate: () => Promise<number>) => {
@@ -612,15 +625,30 @@ export function createHandlers(getAuditRoot: () => string) {
     }
 
     const user = getUserEmail(request.headers);
+    const releaseSlot = uploadSlots.take();
+    if (!releaseSlot) {
+      request.resume();
+      sendJson(response, 429, { error: 'Máy chủ đang nhận và quét nhiều file cùng lúc. Hãy thử lại sau ít phút.' });
+      return;
+    }
     // Chưa biết độ dài file trước khi nhận, nên giữ chỗ theo trần mỗi lần quét. Quét xong trả lại phần thừa.
-    const reserved = await checkBudget(response, user, 'file', fileName, async () => requestsForSeconds(0, DEFAULT_MAX_SCAN_SECONDS));
+    const reserved = await checkBudget(response, user, 'file', fileName, async () => requestsForSeconds(0, DEFAULT_MAX_SCAN_SECONDS)).catch((error: unknown) => {
+      releaseSlot();
+      throw error;
+    });
     if (!reserved) {
+      releaseSlot();
       request.resume();
       return;
     }
 
-    const folder = await mkdtemp(join(tmpdir(), 'credit-checker-'));
-    const removeFolder = () => rm(folder, { recursive: true, force: true }).catch(() => undefined);
+    const folder = await mkdtemp(join(tmpdir(), 'credit-checker-')).catch((error: unknown) => {
+      // Không tạo được thư mục tạm, ví dụ đĩa đầy: chưa nhận file nên nhả chỗ và hoàn ngân sách.
+      releaseSlot();
+      budget?.settle(reserved.hold, 0);
+      throw error;
+    });
+    const removeFolder = () => rm(folder, { recursive: true, force: true }).catch(() => undefined).finally(releaseSlot);
     const uploadPath = join(folder, `upload${extname(fileName).toLowerCase()}`);
     try {
       await saveUpload(request, uploadPath);

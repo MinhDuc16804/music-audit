@@ -31,6 +31,7 @@ from music_audit.commands.videos import (
     cmd_audio_links,
     cmd_detect_music,
     cmd_download_audio,
+    cmd_download_models,
     cmd_list_videos,
     cmd_sample,
 )
@@ -87,6 +88,9 @@ def build_parser():
     command.add_argument("--intro", type=float, default=detect.INTRO_SECONDS, help="Số giây đầu video là intro của kênh, không tính")
     command.add_argument("--outro", type=float, default=detect.OUTRO_SECONDS, help="Số giây cuối video là outro của kênh, không tính")
     command.set_defaults(handler=cmd_detect_music)
+
+    command = commands.add_parser("download-models", help="Tải mô hình YAMNet cho detect-music vào models/ và kiểm mã băm")
+    command.set_defaults(handler=cmd_download_models)
 
     command = commands.add_parser("create-container", help="Tạo container quét trên ACRCloud")
     command.add_argument("--name", default=DEFAULT_CONTAINER_NAME)

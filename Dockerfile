@@ -20,7 +20,9 @@ WORKDIR /app
 # Máy lọc nhạc cho tab Quét cả kênh. Cài hỏng thì app vẫn chạy, tab sẽ báo thiếu mô hình và vẫn quét được khi tắt lọc.
 COPY requirements-detect.txt ./
 RUN /opt/venv/bin/pip install --no-cache-dir -r requirements-detect.txt || echo "Không cài được thư viện lọc nhạc"
-RUN mkdir models && /opt/venv/bin/python -c "import urllib.request as u; u.urlretrieve('https://storage.googleapis.com/mediapipe-models/audio_classifier/yamnet/float32/latest/yamnet.tflite', 'models/yamnet.tflite'); u.urlretrieve('https://raw.githubusercontent.com/tensorflow/models/master/research/audioset/yamnet/yamnet_class_map.csv', 'models/yamnet_class_map.csv')" || echo "Không tải được mô hình lọc nhạc"
+# Chỉ chép phần tải mô hình để lớp này không phải tải lại mỗi lần sửa code. Sai mã băm thì không dùng, tab sẽ báo thiếu mô hình.
+COPY music_audit/__init__.py music_audit/models.py ./music_audit/
+RUN /opt/venv/bin/python -c "from music_audit.models import download_models; download_models('models')" || echo "Không tải được mô hình lọc nhạc đúng bản"
 COPY audit.py ./
 COPY music_audit ./music_audit
 COPY resources ./resources

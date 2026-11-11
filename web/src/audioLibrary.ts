@@ -7,7 +7,7 @@
  * Gần khớp: chỉ trùng tên bài, bỏ qua phần trong ngoặc. Có thể là bài khác cùng tên, nên phải có người duyệt.
  */
 
-import { normalizeText, normalizeTitle } from './textNormalize.ts';
+import { foldText, normalizeText, normalizeTitle } from './textNormalize.ts';
 
 /** Các loại 0 đến 2 không cần ghi nguồn, từ 3 trở lên là Creative Commons. */
 const MAX_NO_ATTRIBUTION_LICENSE_TYPE = 2;
@@ -22,7 +22,8 @@ const MIN_PARTIAL_NAME_WORDS = 2;
 const LIBRARY_STALE_AFTER_DAYS = 30;
 
 /** Các cột bắt buộc của library-additions.csv. */
-const ADDITION_COLUMNS = ['title', 'artist', 'attribution', 'checkedBy', 'checkedOn'];
+/** Mỗi bài thêm tay phải có hai người khác nhau cùng kiểm tra trong Studio, vì dòng thêm vào sẽ cho bài đó qua thẳng. */
+const ADDITION_COLUMNS = ['title', 'artist', 'attribution', 'checkedBy', 'secondCheckedBy', 'checkedOn'];
 
 export interface AudioLibraryTrack {
   title: string;
@@ -162,12 +163,14 @@ export function parseLibraryAdditions(rows: string[][]): AudioLibraryTrack[] {
     if (row.every((cell) => !cell)) {
       return [];
     }
-    const [title, artist, attribution, checkedBy, checkedOn] = ADDITION_COLUMNS.map((column) => row[header.indexOf(column)] ?? '');
+    const [title, artist, attribution, checkedBy, secondCheckedBy, checkedOn] = ADDITION_COLUMNS.map((column) => row[header.indexOf(column)] ?? '');
     const flag = attribution.toLowerCase();
+    const samePerson = foldText(checkedBy).replace(/\s+/g, ' ').trim() === foldText(secondCheckedBy).replace(/\s+/g, ' ').trim();
     const rowProblems = [
       !title || !artist ? 'thiếu tên bài hoặc nghệ sĩ' : '',
       flag !== 'true' && flag !== 'false' ? 'attribution phải là true hoặc false' : '',
-      !checkedBy ? 'thiếu người kiểm tra' : '',
+      !checkedBy || !secondCheckedBy ? 'thiếu người kiểm tra, cần đủ hai người' : '',
+      checkedBy && secondCheckedBy && samePerson ? 'hai người kiểm tra phải là hai người khác nhau' : '',
       !/^\d{4}-\d{2}-\d{2}$/.test(checkedOn) || Number.isNaN(Date.parse(checkedOn)) ? 'checkedOn phải có dạng YYYY-MM-DD' : '',
     ].filter(Boolean);
     if (rowProblems.length > 0) {

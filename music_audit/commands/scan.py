@@ -138,6 +138,8 @@ def _submit_audd(args, paths, rows):
     if args.limit:
         pending = pending[: args.limit]
     failed = 0
+    if rows and not pending and not args.limit:
+        print("Các video này đã quét trước đó, không gửi lại cho AudD.")
     for number, source in enumerate(pending, start=1):
         audio = local_audio(paths, source)
         note = f" (từ file {audio.name})" if audio else ""
@@ -333,6 +335,10 @@ def cmd_submit(args, paths):
               f"{unfiltered} chưa lọc (chưa tải âm thanh).")
     if args.video_id:
         rows = [row for row in rows if youtube_video_id(row["source"]) == args.video_id]
+        if not rows:
+            # Tab Quét cả kênh đếm dòng "Lỗi với" là video lỗi, thay vì coi "Đã quét 0/0" là xong.
+            print(f"Lỗi với {args.video_id}: không có trong danh sách video cần quét, chưa gửi gì cho AudD.")
+            return
     if service == "audd":
         _print_audd_estimate(args, paths, rows)
         _submit_audd(args, paths, rows)

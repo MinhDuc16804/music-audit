@@ -1,3 +1,4 @@
 # Chỉ cần cho lệnh detect-music (lọc trước có nhạc hay không). Các lệnh khác chỉ dùng thư viện chuẩn.
 ai-edge-litert==2.3.0
-numpy>=1.26
+# Bản đã chạy cùng ai-edge-litert 2.3.0. Đổi bản thì chạy thử detect-music trước.
+numpy==2.4.6

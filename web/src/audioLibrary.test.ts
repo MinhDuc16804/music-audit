@@ -193,46 +193,54 @@ describe('mergeAudioLibraryTracks', () => {
 });
 
 describe('parseLibraryAdditions', () => {
-  const header = ['title', 'artist', 'attribution', 'checkedBy', 'checkedOn'];
+  const header = ['title', 'artist', 'attribution', 'checkedBy', 'secondCheckedBy', 'checkedOn'];
 
   it('chỉ có dòng tiêu đề thì không có bài nào', () => {
     expect(parseLibraryAdditions([header])).toEqual([]);
   });
 
   it('đọc bài, bỏ dòng trống, chấp nhận TRUE của Excel', () => {
-    expect(parseLibraryAdditions([header, ['Bai A', 'Ca si', 'TRUE', 'Duc', '2026-11-07'], [''], ['Bai B', 'Ca si', 'false', 'Duc', '2026-11-07']])).toEqual([
+    expect(parseLibraryAdditions([header, ['Bai A', 'Ca si', 'TRUE', 'Duc', 'Lan', '2026-11-07'], [''], ['Bai B', 'Ca si', 'false', 'Duc', 'Lan', '2026-11-07']])).toEqual([
       { title: 'Bai A', artist: 'Ca si', attribution: true },
       { title: 'Bai B', artist: 'Ca si', attribution: false },
     ]);
   });
 
   it('đọc theo tên cột, không theo thứ tự', () => {
-    expect(parseLibraryAdditions([['artist', 'title', 'checkedOn', 'checkedBy', 'attribution'], ['Ca si', 'Bai A', '2026-11-07', 'Duc', 'false']])).toEqual([
+    expect(parseLibraryAdditions([['artist', 'title', 'checkedOn', 'secondCheckedBy', 'checkedBy', 'attribution'], ['Ca si', 'Bai A', '2026-11-07', 'Lan', 'Duc', 'false']])).toEqual([
       { title: 'Bai A', artist: 'Ca si', attribution: false },
     ]);
   });
 
   it('gộp dòng trùng và giữ yêu cầu ghi nguồn', () => {
-    const rows = [header, ['Bai A', 'Ca si', 'true', 'Duc', '2026-11-07'], ['BÀI A', 'Ca si', 'false', 'Duc', '2026-11-07']];
+    const rows = [header, ['Bai A', 'Ca si', 'true', 'Duc', 'Lan', '2026-11-07'], ['BÀI A', 'Ca si', 'false', 'Duc', 'Lan', '2026-11-07']];
     expect(parseLibraryAdditions(rows)).toEqual([{ title: 'BÀI A', artist: 'Ca si', attribution: true }]);
   });
 
   it('báo lỗi khi thiếu cột', () => {
-    expect(() => parseLibraryAdditions([['title', 'artist']])).toThrow('attribution, checkedBy, checkedOn');
+    expect(() => parseLibraryAdditions([['title', 'artist']])).toThrow('attribution, checkedBy, secondCheckedBy, checkedOn');
     expect(() => parseLibraryAdditions([])).toThrow('thiếu cột');
   });
 
   it('báo số dòng sai và không bỏ qua dòng nào', () => {
     const rows = [
       header,
-      ['Bai A', 'Ca si', 'true', 'Duc', '2026-11-07'],
-      ['Bai B', '', 'co', '', '07/11/2026'],
+      ['Bai A', 'Ca si', 'true', 'Duc', 'Lan', '2026-11-07'],
+      ['Bai B', '', 'co', '', '', '07/11/2026'],
     ];
     expect(() => parseLibraryAdditions(rows)).toThrow(/Dòng 3: .*nghệ sĩ.*attribution.*người kiểm tra.*checkedOn/);
   });
 
+  it('bắt buộc đủ hai người kiểm tra', () => {
+    expect(() => parseLibraryAdditions([header, ['Bai A', 'Ca si', 'false', 'Duc', '', '2026-11-07']])).toThrow('cần đủ hai người');
+  });
+
+  it('hai người kiểm tra phải khác nhau, không tính hoa thường, dấu và khoảng trắng', () => {
+    expect(() => parseLibraryAdditions([header, ['Bai A', 'Ca si', 'false', 'Đức', ' duc ', '2026-11-07']])).toThrow('hai người khác nhau');
+  });
+
   it('không tự coi là không cần ghi nguồn khi bỏ trống', () => {
-    expect(() => parseLibraryAdditions([header, ['Bai A', 'Ca si', '', 'Duc', '2026-11-07']])).toThrow('attribution');
+    expect(() => parseLibraryAdditions([header, ['Bai A', 'Ca si', '', 'Duc', 'Lan', '2026-11-07']])).toThrow('attribution');
   });
 });
 

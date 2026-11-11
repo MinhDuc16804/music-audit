@@ -7,11 +7,12 @@ Công cụ của mảng Content Hub; luật chung ở `CLAUDE.md` gốc repo. Ch
 
 ```bash
 python3 -m unittest discover -s tests   # kiểm thử, dùng máy chủ ACRCloud và AudD giả
-python3 audit.py --help                 # các lệnh con: list-videos, sample, audio-links, download-audio, detect-music, create-container, use-container, submit, compare-clips, fetch, report, export, identify, identify-file, durations, channel-check, channel-status, channel-report
+python3 audit.py --help                 # các lệnh con: list-videos, sample, audio-links, download-audio, download-models, detect-music, create-container, use-container, submit, compare-clips, fetch, report, export, identify, identify-file, durations, channel-check, channel-status, channel-report
 ```
 
 Python 3.11 trở lên, code chỉ dùng thư viện chuẩn. Cần `ffmpeg` nếu quét file video trên máy, cần thêm `yt-dlp` cho `identify --extract`.
-Ngoại lệ duy nhất: `detect-music` cần `requirements-detect.txt` (ai-edge-litert, numpy) và mô hình trong `models/`.
+Ngoại lệ duy nhất: `detect-music` cần `requirements-detect.txt` (ai-edge-litert, numpy, đã khóa phiên bản) và mô hình trong `models/`,
+tải bằng `python audit.py download-models` (kiểm mã băm trong `music_audit/models.py`).
 Nạp chúng trong `music_audit/detect.py` khi chạy thật, không import ở đầu file, để các lệnh khác, web app và kiểm thử chạy không cần cài.
 
 `tai_am_thanh.bat` tải âm thanh (yt-dlp, m4a) từ `data/audio/links.txt` vào `data/audio/<video_id>.m4a`.

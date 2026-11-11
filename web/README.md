@@ -91,6 +91,7 @@ mọi người, kể cả người quản trị, dùng app qua tên miền. Thi�
 
 Muốn thêm hoặc bớt người dùng thì sửa policy của ứng dụng trong Access, không cần sửa app. Đăng xuất bằng đường dẫn `/cdn-cgi/access/logout` trên tên miền của app.
 Gói miễn phí của Cloudflare chặn yêu cầu trên 100 MB, nên app giới hạn file tải lên ở 95 MB. File lớn hơn thì xuất riêng phần âm thanh.
+Máy chủ chỉ giữ tối đa `MAX_ACTIVE_UPLOADS` file tải lên cùng lúc (mặc định 3), tính tới khi quét xong, để không đầy đĩa. Container bị giới hạn 3 GB RAM trong `compose.yml`.
 
 Trên VPS, dữ liệu quét trong `out/` nằm ở nhà cung cấp ngoài công ty, và YouTube dễ chặn IP máy chủ hơn, nên quét bằng link có thể không chạy.
 
@@ -131,6 +132,7 @@ Mục Quét hàng loạt nhận tối đa 20 link video mỗi lô, sửa ở `MA
 Mục Quét cả kênh nhận link kênh có @handle hoặc mã UC…, cần `YOUTUBE_API_KEY` để lấy danh sách video. Các bước: lấy danh sách, tải âm thanh, lọc nhạc nếu chọn, xác nhận chi phí, nhận diện, báo cáo.
 
 - App luôn dừng hỏi trước khi gửi AudD, kèm số video và số yêu cầu chính xác. Tải âm thanh và lọc nhạc không tốn lượt.
+- Chỉ quét được các kênh trong `ALLOWED_CHANNELS` (link, @handle hoặc mã UC…, cách nhau bằng dấu phẩy). Để trống thì quét được mọi kênh. Mục viết sai bị bỏ qua và ghi vào log, không bao giờ thành cho phép tất cả.
 - Mỗi lần quét có trần `MAX_CHANNEL_SCAN_REQUESTS`, mặc định 5000 yêu cầu. Vượt trần thì không gửi được, hãy quét kênh lớn thành nhiều lần. Người bấm xác nhận và số yêu cầu được ghi vào `out/usage.jsonl`.
 - Số yêu cầu được giữ chỗ trong ngân sách tháng khi bấm Gửi nhận diện, dừng giữa chừng thì hoàn lại phần chưa gửi.
 - Một video làm lệnh gửi lỗi thì lần quét tạm dừng. Bấm Chạy tiếp mà vẫn lỗi đúng video đó thì app bỏ qua nó, video nằm ở nhóm Cần nghe lại.
@@ -224,8 +226,8 @@ Bài chưa khớp chắc có nút "Tra trong Studio": nút chép tên bài và m
 Bài có trong Studio mà danh sách còn thiếu thì thêm một dòng vào `library-additions.csv`, không cần chạy crawler:
 
 ```csv
-title,artist,attribution,checkedBy,checkedOn
-Tên bài,Tên nghệ sĩ,false,Đức,2026-11-07
+title,artist,attribution,checkedBy,secondCheckedBy,checkedOn
+Tên bài,Tên nghệ sĩ,false,Người kiểm tra 1,Người kiểm tra 2,2026-11-07
 ```
 
 Rồi chạy lệnh sau. Bản Docker cần build lại image để nhận danh sách mới:
@@ -237,7 +239,8 @@ npm run library:additions
 - **Phải nghe đối chiếu trong Studio trước khi thêm.** Dòng đã thêm sẽ cho bài đó qua thẳng, không còn qua người duyệt. Thêm nhầm một bài khác cùng tên là có thể lọt bài có bản quyền.
 - `title`, `artist`: ghi đúng tên app đang hiện, vì app so với tên AudD trả về. Tên này có thể khác tên trong Studio.
 - `attribution`: `true` nếu Studio yêu cầu ghi nguồn, `false` nếu không. Không được bỏ trống.
-- `checkedBy`, `checkedOn`: ai đã kiểm tra và ngày kiểm tra, dạng YYYY-MM-DD.
+- `checkedBy`, `secondCheckedBy`: hai người khác nhau đã cùng nghe đối chiếu trong Studio. Thiếu một người, hoặc hai ô là cùng một người, thì lệnh báo lỗi.
+- `checkedOn`: ngày kiểm tra, dạng YYYY-MM-DD.
 - Thêm nhầm thì xóa dòng đó rồi chạy lại lệnh, bài sẽ rời danh sách.
 - `library:studio` và `library:import` luôn áp lại file này. Bài thêm tay sau này có trong lần xuất Studio thì được tính là bài Studio.
 - Có dòng sai thì lệnh báo số dòng và không ghi gì.

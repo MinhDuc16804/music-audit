@@ -8,6 +8,7 @@ import time
 from music_audit import detect
 from music_audit.common import normalize_yes_no, read_csv, TESTSET_COLUMNS, write_csv
 from music_audit.extract import download_audio, ExtractError, ExtractStop
+from music_audit.models import download_models, ModelError
 from music_audit.workspace import NO_VIDEOS, known_durations, local_audio, read_json, video_rows, videos_by_url, write_json
 from music_audit.youtube import youtube_video_id, YoutubeClient
 
@@ -164,3 +165,12 @@ def cmd_detect_music(args, paths):
             print("BỎ SÓT video có nhạc: " + ", ".join(missed) + ". Hạ ngưỡng trước khi dùng --music-only.")
     if missing:
         print("Video chưa tải âm thanh: chạy audio-links rồi tai_am_thanh.bat.")
+
+
+def cmd_download_models(args, paths):
+    """Tải mô hình YAMNet vào models/ và kiểm mã băm. Đã có đúng bản thì không tải lại."""
+    try:
+        fetched = download_models(paths.models)
+    except ModelError as error:
+        sys.exit(str(error))
+    print(f"Đã tải {', '.join(fetched)} vào {paths.models}." if fetched else f"Mô hình trong {paths.models} đã đúng bản, không cần tải.")

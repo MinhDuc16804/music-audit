@@ -254,6 +254,20 @@ class BulkFlowTests(ServerTestCase):
         export = self.run_cli("export", "--all-videos")
         self.assertIn("Sạch: 0  Có nhạc: 1  Cần nghe lại: 1 (tổng 2 video)", export.stdout)
 
+    def test_unknown_video_id_is_reported_as_error_not_done(self):
+        self.write_all_videos([("song0000001", 30)])
+        result = self.run_cli("submit", "--delay", "0", "--all-videos", "--video-id=khongcoxxxx")
+        self.assertIn("Lỗi với khongcoxxxx", result.stdout)
+        self.assertEqual(FakeAudd.requests, [])
+
+    def test_already_scanned_video_id_is_not_sent_again(self):
+        self.write_all_videos([("song0000001", 30)])
+        self.run_cli("submit", "--delay", "0", "--all-videos", "--video-id=song0000001")
+        again = self.run_cli("submit", "--delay", "0", "--all-videos", "--video-id=song0000001")
+        self.assertIn("đã quét trước đó", again.stdout)
+        self.assertNotIn("Lỗi với", again.stdout)
+        self.assertEqual(len(FakeAudd.requests), 1)
+
     def test_long_video_keeps_cost_limit_and_warns(self):
         self.write_all_videos([("song0000001", 3600)])
         result = self.run_cli("submit", "--delay", "0", "--all-videos", extra_env={"AUDD_MAX_CHUNKS": "25"})

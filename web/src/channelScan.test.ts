@@ -3,6 +3,7 @@ import {
   buildChannelGate,
   buildChannelSongsCsv,
   buildChannelVideosCsv,
+  parseAllowedChannels,
   parseChannelInput,
   parseChannelOptions,
   parseProgress,
@@ -21,6 +22,26 @@ function video(videoId: string, overrides: Partial<ChannelVideo> = {}): ChannelV
 
 const ALL: ChannelOptions = { filter: false, musicOnly: false, clips: 0, limit: 0 };
 const MUSIC_ONLY: ChannelOptions = { ...ALL, filter: true, musicOnly: true };
+
+describe('parseAllowedChannels', () => {
+  it('để trống là không giới hạn', () => {
+    expect(parseAllowedChannels(undefined)).toBeNull();
+    expect(parseAllowedChannels(' , \n ')).toBeNull();
+  });
+
+  it('nhận link, @handle và mã UC, không phân biệt hoa thường với @handle', () => {
+    const allowed = parseAllowedChannels('https://www.youtube.com/@HIMAGCNCLASER, @infoquocduy\nhttps://www.youtube.com/@semacmaygo/videos,UC1234567890123456789012');
+    expect([...(allowed?.keys ?? [])]).toEqual(['@himagcnclaser', '@infoquocduy', '@semacmaygo', 'UC1234567890123456789012']);
+    expect(allowed?.invalid).toEqual([]);
+    expect(allowed?.keys.has(parseChannelInput('youtube.com/@HimagCncLaser')?.key ?? '')).toBe(true);
+  });
+
+  it('mục viết sai bị bỏ qua và báo lại, không thành cho phép tất cả', () => {
+    const allowed = parseAllowedChannels('khong phai kenh, https://www.youtube.com/watch?v=abc');
+    expect(allowed?.keys.size).toBe(0);
+    expect(allowed?.invalid).toHaveLength(2);
+  });
+});
 
 describe('parseChannelInput', () => {
   it('nhận link @handle, link mã kênh và tên trần', () => {
